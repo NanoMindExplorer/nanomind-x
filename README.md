@@ -11,7 +11,30 @@ author parsing. Full upstream attribution is in `NOTICE`.
 
 ## Install
 
-Requires Node 24 and npm.
+Requires Node 20 or newer and npm. The fastest way is npx — no clone
+needed:
+
+```sh
+npx nanomind-x health
+```
+
+This installs the latest published release from npm
+(https://www.npmjs.com/package/nanomind-x) and runs it. Every command below
+works the same way, prefixed with `npx`:
+
+```sh
+npx nanomind-x search "freemint bsc" --mode latest --limit 5
+npx nanomind-x-engine login --cookies-file cookies.json
+```
+
+Notes for npx installs: the install ships the tool only, not a session —
+you still need to log in with your own X cookies (see Session setup). On a
+slow network the first install can stall while puppeteer downloads
+Chromium; if it does, retry with
+`PUPPETEER_SKIP_DOWNLOAD=1 npx nanomind-x` (the GraphQL path does not need
+the browser).
+
+Or install from source:
 
 ```sh
 git clone https://github.com/NanoMindExplorer/nanomind-x.git
