@@ -412,6 +412,46 @@ export async function unlikeTweet(http, tweetId) {
 }
 
 /**
+ * Bookmark a tweet.
+ *
+ * Local patch 2026-11-06 (hero, v2.0.0): mirrors likeTweet exactly, but
+ * with the CreateBookmark endpoint (query ID from the discovery cache).
+ *
+ * @param {Object} http
+ * @param {string} tweetId
+ * @returns {Promise<void>}
+ */
+export async function bookmarkTweet(http, tweetId) {
+  const endpoint = GRAPHQL_ENDPOINTS.CreateBookmark;
+  const url = endpoint.url(endpoint.queryId);
+  const body = {
+    variables: { tweet_id: tweetId },
+    queryId: endpoint.queryId,
+  };
+  await http.post(url, body);
+}
+
+/**
+ * Remove a tweet's bookmark.
+ *
+ * Local patch 2026-11-06 (hero, v2.0.0): mirrors unlikeTweet exactly,
+ * but with the DeleteBookmark endpoint.
+ *
+ * @param {Object} http
+ * @param {string} tweetId
+ * @returns {Promise<void>}
+ */
+export async function unbookmarkTweet(http, tweetId) {
+  const endpoint = GRAPHQL_ENDPOINTS.DeleteBookmark;
+  const url = endpoint.url(endpoint.queryId);
+  const body = {
+    variables: { tweet_id: tweetId },
+    queryId: endpoint.queryId,
+  };
+  await http.post(url, body);
+}
+
+/**
  * Retweet a tweet.
  *
  * @param {Object} http

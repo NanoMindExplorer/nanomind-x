@@ -4,3 +4,5 @@ node_modules/
 xagent_fit_report.md
 proxy_forward.log
 .DS_Store
+# Pre-patch originals stay local; the patch files themselves are the record.
+patches/*.orig-*

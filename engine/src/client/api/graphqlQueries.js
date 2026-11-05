@@ -122,6 +122,9 @@ export const GRAPHQL_ENDPOINTS = {
   UnfavoriteTweet: graphqlEndpoint('UnfavoriteTweet', 'ZYKSe-w7KEslx3JhSIk5LA', { method: 'POST' }),
   CreateRetweet: graphqlEndpoint('CreateRetweet', 'mbRO74GrOvSfRcJnlMapnQ', { method: 'POST' }),
   DeleteRetweet: graphqlEndpoint('DeleteRetweet', 'iQtK4dl5hBmXewYZCnMPAA', { method: 'POST' }),
+  CreateBookmark: graphqlEndpoint('CreateBookmark', 'aoDbu3RHznuiSkQ9aNM67Q', { method: 'POST' }),
+  DeleteBookmark: graphqlEndpoint('DeleteBookmark', 'Wlmlj2-xzyS1GN3a6cj-mQ', { method: 'POST' }),
+  BlockedAccountsAll: graphqlEndpoint('BlockedAccountsAll', 'XDSJN_rGtdlynilYFJLYOw', { method: 'POST' }),
   CreateFollow: {
     queryId: null,
     operationName: null,

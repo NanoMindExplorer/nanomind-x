@@ -406,6 +406,19 @@ export class Scraper {
   }
 
   /**
+   * List the accounts this user has blocked.
+   *
+   * Local patch 2026-11-06 (hero #15, v2.0.0): see usersApi.getBlockedUsers.
+   *
+   * @param {number} [count=20]
+   * @returns {Promise<Array<{id: string, screenName: string, name: string}>>}
+   */
+  async getBlockedUsers(count = 20) {
+    const validCount = validateCount(count, 1, 100);
+    return usersApi.getBlockedUsers(this._http, validCount);
+  }
+
+  /**
    * Get users that a user is following.
    *
    * @param {string} userId - Twitter user ID
@@ -595,6 +608,247 @@ export class Scraper {
     this._requireAuth();
     const validId = validateTweetId(id);
     return tweetsApi.unretweet(this._http, validId);
+  }
+
+  /**
+   * Bookmark a tweet.
+   *
+   * Local patch 2026-11-06 (hero, v2.0.0): mirrors likeTweet; the
+   * bookmark functions are new in tweets.js (CreateBookmark endpoint).
+   *
+   * @param {string} id - Tweet ID
+   * @returns {Promise<void>}
+   */
+  async bookmarkTweet(id) {
+    this._requireAuth();
+    const validId = validateTweetId(id);
+    return tweetsApi.bookmarkTweet(this._http, validId);
+  }
+
+  /**
+   * Remove a tweet's bookmark.
+   *
+   * Local patch 2026-11-06 (hero, v2.0.0): mirrors unlikeTweet.
+   *
+   * @param {string} id - Tweet ID
+   * @returns {Promise<void>}
+   */
+  async unbookmarkTweet(id) {
+    this._requireAuth();
+    const validId = validateTweetId(id);
+    return tweetsApi.unbookmarkTweet(this._http, validId);
+  }
+
+  /**
+   * Follow a user by screen name.
+   *
+   * Local patch 2026-11-06 (hero #10): the Scraper class had no follow
+   * method — follow lived only in the scrapers-layer engagement module
+   * (TwitterHttpClient, unsigned) and in the MCP browser path. This
+   * method uses the REST friendships/create endpoint over the same signed
+   * SimpleHttp path as tweets (cookies + ct0 + x-client-transaction-id),
+   * resolving the screen name via getProfile first.
+   *
+   * @param {string} username - Screen name without `@`
+   * @returns {Promise<object>} - Parsed friendships/create response
+   */
+  async followByUsername(username) {
+    this._requireAuth();
+    const clean = validateUsername(username);
+    const profile = await this.getProfile(clean);
+    const userId = profile?.id;
+    if (!userId) {
+      throw new ScraperError(`Could not resolve @${clean} to a user id`);
+    }
+    const body = new URLSearchParams({
+      user_id: String(userId),
+      include_profile_interstitial_type: '1',
+      skip_status: 'true',
+    }).toString();
+    return this._http.post(
+      'https://x.com/i/api/1.1/friendships/create.json',
+      body,
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+    );
+  }
+
+  /**
+   * Unfollow a user by username.
+   *
+   * Local patch 2026-11-06 (hero #14, v2.0.0): mirrors followByUsername
+   * (REST friendships/destroy.json). The built-in Scraper.unfollowUser
+   * routes through usersApi.unfollowUser, whose GraphQL-style body and
+   * `contentType` header key make X answer 404 (verified live 2026-11-06);
+   * the REST destroy endpoint with the follow-style call works (verified
+   * live on @dewata_nft the same day).
+   *
+   * @param {string} username - Twitter handle
+   * @returns {Promise<object>} - Parsed destroy response
+   */
+  async unfollowByUsername(username) {
+    this._requireAuth();
+    const clean = validateUsername(username);
+    const profile = await this.getProfile(clean);
+    const userId = profile?.id;
+    if (!userId) {
+      throw new ScraperError(`Could not resolve @${clean} to a user id`);
+    }
+    const body = new URLSearchParams({
+      user_id: String(userId),
+      include_profile_interstitial_type: '1',
+      skip_status: 'true',
+    }).toString();
+    return this._http.post(
+      'https://x.com/i/api/1.1/friendships/destroy.json',
+      body,
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+    );
+  }
+
+  /**
+   * Pin a tweet to the profile timeline.
+   *
+   * Local patch 2026-11-06 (hero #11): mirrors followByUsername — the
+   * Scraper class had no pin method (pin lived only in the scrapers-layer
+   * engagement module and the MCP browser path). Uses REST
+   * account/pin_tweet over the same signed SimpleHttp path as tweets.
+   *
+   * @param {string} id - Tweet ID to pin
+   * @returns {Promise<object>} - Parsed pin_tweet response
+   */
+  async pinTweet(id) {
+    this._requireAuth();
+    const validId = validateTweetId(id);
+    const body = new URLSearchParams({
+      tweet_mode: 'extended',
+      id: validId,
+    }).toString();
+    return this._http.post(
+      'https://x.com/i/api/1.1/account/pin_tweet.json',
+      body,
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+    );
+  }
+
+  /**
+   * Unpin a tweet from the profile timeline.
+   *
+   * Local patch 2026-11-06 (hero, v2.0.0): REST mirror of pinTweet.
+   *
+   * @param {string} id - Tweet ID to unpin
+   * @returns {Promise<object>} - Parsed unpin_tweet response
+   */
+  async unpinTweet(id) {
+    this._requireAuth();
+    const validId = validateTweetId(id);
+    const body = new URLSearchParams({
+      tweet_mode: 'extended',
+      id: validId,
+    }).toString();
+    return this._http.post(
+      'https://x.com/i/api/1.1/account/unpin_tweet.json',
+      body,
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+    );
+  }
+
+  /**
+   * Update the profile description (bio).
+   *
+   * Local patch 2026-11-06 (hero #12): the Scraper class had no profile
+   * update — bio editing lived only in the MCP browser path
+   * (x_update_profile), which timed out navigating to settings/profile.
+   * The REST account/update_profile endpoint works over the same signed
+   * SimpleHttp path as tweets. Verified live 2026-11-06: bio set on
+   * @Shiba_Nakamoto in ~1 s. Only `description` is supported here; name,
+   * location and website still need the browser path.
+   *
+   * @param {string} bio - New profile description, max 160 characters
+   * @returns {Promise<object>} - Parsed update_profile response
+   */
+  async updateProfileBio(bio) {
+    this._requireAuth();
+    if (typeof bio !== 'string' || bio.length > 160) {
+      throw new ScraperError(`Bio must be a string of at most 160 characters (got ${String(bio).length})`);
+    }
+    const body = new URLSearchParams({ description: bio }).toString();
+    return this._http.post(
+      'https://x.com/i/api/1.1/account/update_profile.json',
+      body,
+      { 'Content-Type': 'application/x-www-form-urlencoded' },
+    );
+  }
+
+  /**
+   * Block a user by screen name.
+   *
+   * Local patch 2026-11-06 (hero, v2.0.0): mirrors followByUsername —
+   * resolve via getProfile, then REST blocks/create over the same signed
+   * SimpleHttp path. The same private helper serves block/unblock/mute/
+   * unmute; only the endpoint differs.
+   *
+   * @param {string} username - Screen name without `@`
+   * @returns {Promise<object>} - Parsed blocks/create response
+   */
+  async blockUserByUsername(username) {
+    return this._userRestAction(username, 'https://x.com/i/api/1.1/blocks/create.json');
+  }
+
+  /**
+   * Unblock a user by screen name.
+   *
+   * Local patch 2026-11-06 (hero, v2.0.0).
+   *
+   * @param {string} username - Screen name without `@`
+   * @returns {Promise<object>} - Parsed blocks/destroy response
+   */
+  async unblockUserByUsername(username) {
+    return this._userRestAction(username, 'https://x.com/i/api/1.1/blocks/destroy.json');
+  }
+
+  /**
+   * Mute a user by screen name.
+   *
+   * Local patch 2026-11-06 (hero, v2.0.0).
+   *
+   * @param {string} username - Screen name without `@`
+   * @returns {Promise<object>} - Parsed mutes/users/create response
+   */
+  async muteUserByUsername(username) {
+    return this._userRestAction(username, 'https://x.com/i/api/1.1/mutes/users/create.json');
+  }
+
+  /**
+   * Unmute a user by screen name.
+   *
+   * Local patch 2026-11-06 (hero, v2.0.0).
+   *
+   * @param {string} username - Screen name without `@`
+   * @returns {Promise<object>} - Parsed mutes/users/destroy response
+   */
+  async unmuteUserByUsername(username) {
+    return this._userRestAction(username, 'https://x.com/i/api/1.1/mutes/users/destroy.json');
+  }
+
+  /**
+   * Shared REST user action: resolve the screen name to a user ID, then
+   * POST user_id + skip_status to the given 1.1 endpoint.
+   *
+   * @private
+   */
+  async _userRestAction(username, url) {
+    this._requireAuth();
+    const clean = validateUsername(username);
+    const profile = await this.getProfile(clean);
+    const userId = profile?.id;
+    if (!userId) {
+      throw new ScraperError(`Could not resolve @${clean} to a user id`);
+    }
+    const body = new URLSearchParams({
+      user_id: String(userId),
+      skip_status: 'true',
+    }).toString();
+    return this._http.post(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' });
   }
 
   // =========================================================================
