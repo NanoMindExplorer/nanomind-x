@@ -1,0 +1,146 @@
+--- patches/Scraper.js.orig-2026-11-06-v2	2026-11-05 19:41:47.497841302 +0000
++++ engine/src/client/Scraper.js	2026-11-05 19:42:02.931216296 +0000
+@@ -598,6 +598,35 @@
+   }
+ 
+   /**
++   * Bookmark a tweet.
++   *
++   * Local patch 2026-11-06 (hero, v2.0.0): mirrors likeTweet; the
++   * bookmark functions are new in tweets.js (CreateBookmark endpoint).
++   *
++   * @param {string} id - Tweet ID
++   * @returns {Promise<void>}
++   */
++  async bookmarkTweet(id) {
++    this._requireAuth();
++    const validId = validateTweetId(id);
++    return tweetsApi.bookmarkTweet(this._http, validId);
++  }
++
++  /**
++   * Remove a tweet's bookmark.
++   *
++   * Local patch 2026-11-06 (hero, v2.0.0): mirrors unlikeTweet.
++   *
++   * @param {string} id - Tweet ID
++   * @returns {Promise<void>}
++   */
++  async unbookmarkTweet(id) {
++    this._requireAuth();
++    const validId = validateTweetId(id);
++    return tweetsApi.unbookmarkTweet(this._http, validId);
++  }
++
++  /**
+    * Follow a user by screen name.
+    *
+    * Local patch 2026-11-06 (hero #10): the Scraper class had no follow
+@@ -656,6 +685,28 @@
+   }
+ 
+   /**
++   * Unpin a tweet from the profile timeline.
++   *
++   * Local patch 2026-11-06 (hero, v2.0.0): REST mirror of pinTweet.
++   *
++   * @param {string} id - Tweet ID to unpin
++   * @returns {Promise<object>} - Parsed unpin_tweet response
++   */
++  async unpinTweet(id) {
++    this._requireAuth();
++    const validId = validateTweetId(id);
++    const body = new URLSearchParams({
++      tweet_mode: 'extended',
++      id: validId,
++    }).toString();
++    return this._http.post(
++      'https://x.com/i/api/1.1/account/unpin_tweet.json',
++      body,
++      { 'Content-Type': 'application/x-www-form-urlencoded' },
++    );
++  }
++
++  /**
+    * Update the profile description (bio).
+    *
+    * Local patch 2026-11-06 (hero #12): the Scraper class had no profile
+@@ -682,6 +733,78 @@
+     );
+   }
+ 
++  /**
++   * Block a user by screen name.
++   *
++   * Local patch 2026-11-06 (hero, v2.0.0): mirrors followByUsername —
++   * resolve via getProfile, then REST blocks/create over the same signed
++   * SimpleHttp path. The same private helper serves block/unblock/mute/
++   * unmute; only the endpoint differs.
++   *
++   * @param {string} username - Screen name without `@`
++   * @returns {Promise<object>} - Parsed blocks/create response
++   */
++  async blockUserByUsername(username) {
++    return this._userRestAction(username, 'https://x.com/i/api/1.1/blocks/create.json');
++  }
++
++  /**
++   * Unblock a user by screen name.
++   *
++   * Local patch 2026-11-06 (hero, v2.0.0).
++   *
++   * @param {string} username - Screen name without `@`
++   * @returns {Promise<object>} - Parsed blocks/destroy response
++   */
++  async unblockUserByUsername(username) {
++    return this._userRestAction(username, 'https://x.com/i/api/1.1/blocks/destroy.json');
++  }
++
++  /**
++   * Mute a user by screen name.
++   *
++   * Local patch 2026-11-06 (hero, v2.0.0).
++   *
++   * @param {string} username - Screen name without `@`
++   * @returns {Promise<object>} - Parsed mutes/users/create response
++   */
++  async muteUserByUsername(username) {
++    return this._userRestAction(username, 'https://x.com/i/api/1.1/mutes/users/create.json');
++  }
++
++  /**
++   * Unmute a user by screen name.
++   *
++   * Local patch 2026-11-06 (hero, v2.0.0).
++   *
++   * @param {string} username - Screen name without `@`
++   * @returns {Promise<object>} - Parsed mutes/users/destroy response
++   */
++  async unmuteUserByUsername(username) {
++    return this._userRestAction(username, 'https://x.com/i/api/1.1/mutes/users/destroy.json');
++  }
++
++  /**
++   * Shared REST user action: resolve the screen name to a user ID, then
++   * POST user_id + skip_status to the given 1.1 endpoint.
++   *
++   * @private
++   */
++  async _userRestAction(username, url) {
++    this._requireAuth();
++    const clean = validateUsername(username);
++    const profile = await this.getProfile(clean);
++    const userId = profile?.id;
++    if (!userId) {
++      throw new ScraperError(`Could not resolve @${clean} to a user id`);
++    }
++    const body = new URLSearchParams({
++      user_id: String(userId),
++      skip_status: 'true',
++    }).toString();
++    return this._http.post(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' });
++  }
++
+   // =========================================================================
+   // Search
+   // =========================================================================

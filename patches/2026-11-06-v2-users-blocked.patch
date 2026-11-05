@@ -1,0 +1,62 @@
+--- patches/users.js.orig-2026-11-06-v2	2026-11-06 02:53:44.420390831 +0700
++++ engine/src/client/api/users.js	2026-11-06 02:54:52.834210364 +0700
+@@ -246,3 +246,59 @@
+   });
+   await http.post(url, body, { contentType: 'application/x-www-form-urlencoded' });
+ }
++
++/**
++ * List the accounts this user has blocked.
++ *
++ * Local patch 2026-11-06 (hero #15, v2.0.0): BlockedAccountsAll is a
++ * timeline-shaped query; the blocked users sit in nested timeline entries,
++ * so the parser walks the whole response collecting user legacy objects
++ * (screen_name + id_str). Query ID verified live 2026-11-06 — the discovery
++ * cache held a stale ID (vSD6QsvM22S5…) that 404s; the live ID
++ * XDSJN_rGtdlynilYFJLYOw comes from the engine's generated endpoint table
++ * and the cache entry was corrected to match.
++ *
++ * @param {Object} http
++ * @param {number} [count=20]
++ * @returns {Promise<Array<{id: string, screenName: string, name: string}>>}
++ */
++export async function getBlockedUsers(http, count = 20) {
++  const endpoint = GRAPHQL_ENDPOINTS.BlockedAccountsAll;
++  const url = endpoint.url(endpoint.queryId);
++  const data = await http.post(url, {
++    variables: { count, cursor: null, includePromotedContent: false },
++    features: DEFAULT_FEATURES,
++  });
++  const seen = new Set();
++  const users = [];
++  const walk = (node) => {
++    if (!node || typeof node !== 'object') return;
++    if (Array.isArray(node)) {
++      for (const item of node) walk(item);
++      return;
++    }
++    // New-style user object: result.core { name, screen_name, created_at },
++    // id in result.rest_id. Old-style: result.legacy { screen_name, id_str }.
++    const core = node.core;
++    if (core && typeof core.screen_name === 'string') {
++      const id = node.rest_id || node.id || node.legacy?.id_str || '';
++      const key = id || core.screen_name;
++      if (!seen.has(key)) {
++        seen.add(key);
++        users.push({ id: String(id), screenName: core.screen_name, name: core.name || '' });
++      }
++    } else {
++      const legacy = node.legacy;
++      if (legacy && typeof legacy.screen_name === 'string' && legacy.id_str) {
++        const key = legacy.id_str;
++        if (!seen.has(key)) {
++          seen.add(key);
++          users.push({ id: legacy.id_str, screenName: legacy.screen_name, name: legacy.name || '' });
++        }
++      }
++    }
++    for (const value of Object.values(node)) walk(value);
++  };
++  walk(data);
++  return users.slice(0, count);
++}

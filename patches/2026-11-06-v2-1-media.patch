@@ -1,0 +1,205 @@
+--- /dev/null
++++ b/engine/src/client/api/media.js
+@@ -0,0 +1,202 @@
++// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
++/**
++ * nanomind-x Client — Media Upload API
++ *
++ * Chunked media upload (INIT / APPEND / FINALIZE) against the media upload
++ * host, so a photo or GIF can be attached to a CreateTweet call.
++ *
++ * Local patch 2026-11-06 (hero #17, v2.1.0): the engine had no upload path
++ * at all (media lived only in the MCP browser compose flow). This module
++ * implements the web client's upload flow over the same signed SimpleHttp
++ * path as tweets (cookies + ct0 + x-client-transaction-id, best-effort):
++ *
++ *   POST upload.twitter.com/i/media/upload.json
++ *     command=INIT, total_bytes, media_type, media_category
++ *       -> { media_id_string }
++ *     command=APPEND, media_id, segment_index, media=<chunk, <= 5 MB>
++ *     command=FINALIZE, media_id
++ *       -> processing_info.state 'succeeded' (images) or 'pending'
++ *          (GIFs may need a STATUS poll until 'succeeded' / 'failed')
++ *
++ * The `/i/` endpoint is the web client's; if it ever 404s, INIT falls back
++ * to the classic `/1.1/` endpoint on the same host. APPEND tolerates an
++ * empty (204) response. Only still images are supported here (jpg/png/gif/
++ * webp); video needs the tweet_video category plus longer processing and is
++ * out of scope for v2.1.0.
++ *
++ * X's documented limits, enforced by the caller (see Scraper.uploadMedia):
++ * jpg/png/webp <= 5 MB, gif <= 15 MB. APPEND segments are 5 MB max.
++ *
++ * @author nich (@nichxbt) - https://github.com/nirholas
++ * @license Apache-2.0
++ */
++
++import { ScraperError } from '../errors.js';
++import * as fs from 'node:fs/promises';
++import path from 'node:path';
++
++const UPLOAD_HOSTS = [
++  'https://upload.twitter.com/i/media/upload.json',
++  'https://upload.twitter.com/1.1/media/upload.json',
++];
++
++const SEGMENT_BYTES = 5 * 1024 * 1024;
++
++/** MIME type by file extension (still images only). */
++export const MEDIA_MIME_TYPES = Object.freeze({
++  '.jpg': 'image/jpeg',
++  '.jpeg': 'image/jpeg',
++  '.png': 'image/png',
++  '.gif': 'image/gif',
++  '.webp': 'image/webp',
++});
++
++/** Max bytes per type (X's documented limits). */
++export const MEDIA_MAX_BYTES = Object.freeze({
++  'image/jpeg': 5 * 1024 * 1024,
++  'image/png': 5 * 1024 * 1024,
++  'image/webp': 5 * 1024 * 1024,
++  'image/gif': 15 * 1024 * 1024,
++});
++
++export function mediaCategoryFor(mimeType) {
++  return mimeType === 'image/gif' ? 'tweet_gif' : 'tweet_image';
++}
++
++/**
++ * Read an image file from disk, validate it, and upload it.
++ *
++ * @param {Object} http - HTTP client with a postForm(url, FormData) method
++ * @param {string} filePath - Path to a jpg/png/gif/webp file
++ * @returns {Promise<{ mediaId: string, mimeType: string, bytes: number, filename: string }>}
++ */
++export async function uploadMediaFile(http, filePath) {
++  let buffer;
++  try {
++    buffer = await fs.readFile(filePath);
++  } catch {
++    throw new ScraperError(`Media file not found: ${filePath}`, 'MEDIA_UPLOAD');
++  }
++  const ext = path.extname(filePath).toLowerCase();
++  const mimeType = MEDIA_MIME_TYPES[ext];
++  if (!mimeType) {
++    throw new ScraperError(
++      `Unsupported media type "${ext || '(no extension)'}": only jpg, png, gif and webp are supported`,
++      'MEDIA_UPLOAD',
++    );
++  }
++  const maxBytes = MEDIA_MAX_BYTES[mimeType];
++  if (buffer.length > maxBytes) {
++    throw new ScraperError(
++      `Media file too large: ${buffer.length} bytes exceeds the ${maxBytes} byte limit for ${mimeType}`,
++      'MEDIA_UPLOAD',
++    );
++  }
++  const mediaId = await uploadMedia(http, {
++    buffer,
++    mimeType,
++    filename: path.basename(filePath),
++  });
++  return { mediaId, mimeType, bytes: buffer.length, filename: path.basename(filePath) };
++}
++
++const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
++
++/**
++ * Upload one image/GIF buffer and return its media id.
++ *
++ * @param {Object} http - HTTP client with a postForm(url, FormData) method
++ * @param {Object} options
++ * @param {Buffer|Uint8Array} options.buffer - File bytes
++ * @param {string} options.mimeType - e.g. 'image/png'
++ * @param {string} [options.filename='upload'] - File name for the form part
++ * @returns {Promise<string>} media_id_string, ready to attach to CreateTweet
++ */
++export async function uploadMedia(http, { buffer, mimeType, filename = 'upload' }) {
++  if (!buffer || buffer.length === 0) {
++    throw new ScraperError('Cannot upload an empty file', 'MEDIA_UPLOAD');
++  }
++  const maxBytes = MEDIA_MAX_BYTES[mimeType];
++  if (!maxBytes) {
++    throw new ScraperError(`Unsupported media type: ${mimeType}`, 'MEDIA_UPLOAD');
++  }
++  if (buffer.length > maxBytes) {
++    throw new ScraperError(
++      `Media too large: ${buffer.length} bytes exceeds the ${maxBytes} byte limit for ${mimeType}`,
++      'MEDIA_UPLOAD',
++    );
++  }
++
++  const category = mediaCategoryFor(mimeType);
++  let baseUrl = UPLOAD_HOSTS[0];
++
++  // INIT — fall back to the /1.1/ host if the /i/ endpoint 404s.
++  let init;
++  {
++    const form = new FormData();
++    form.append('command', 'INIT');
++    form.append('total_bytes', String(buffer.length));
++    form.append('media_type', mimeType);
++    form.append('media_category', category);
++    try {
++      init = await http.postForm(baseUrl, form);
++    } catch (e) {
++      const status = e?.details?.httpStatus ?? e?.httpStatus ?? null;
++      if (status === 404 && UPLOAD_HOSTS[1] !== baseUrl) {
++        baseUrl = UPLOAD_HOSTS[1];
++        const retry = new FormData();
++        retry.append('command', 'INIT');
++        retry.append('total_bytes', String(buffer.length));
++        retry.append('media_type', mimeType);
++        retry.append('media_category', category);
++        init = await http.postForm(baseUrl, retry);
++      } else {
++        throw e;
++      }
++    }
++  }
++  const mediaId = init?.media_id_string || init?.media_id;
++  if (!mediaId) {
++    throw new ScraperError(`Media INIT returned no media id: ${JSON.stringify(init).slice(0, 300)}`, 'MEDIA_UPLOAD');
++  }
++
++  // APPEND — 5 MB segments, segment_index 0..n.
++  const segments = Math.max(1, Math.ceil(buffer.length / SEGMENT_BYTES));
++  for (let i = 0; i < segments; i++) {
++    const chunk = buffer.subarray(i * SEGMENT_BYTES, (i + 1) * SEGMENT_BYTES);
++    const form = new FormData();
++    form.append('command', 'APPEND');
++    form.append('media_id', String(mediaId));
++    form.append('segment_index', String(i));
++    form.append('media', new Blob([chunk], { type: mimeType }), filename);
++    await http.postForm(baseUrl, form);
++  }
++
++  // FINALIZE — then poll STATUS while the media is still processing
++  // (GIFs; images usually succeed immediately). NOTE: STATUS is a GET with
++  // query params, not a POST — posting it as form data answers HTTP 400
++  // (found live 2026-11-06 while testing an animated GIF).
++  const finalizeForm = new FormData();
++  finalizeForm.append('command', 'FINALIZE');
++  finalizeForm.append('media_id', String(mediaId));
++  let fin = await http.postForm(baseUrl, finalizeForm);
++
++  let state = fin?.processing_info?.state;
++  let waitedMs = 0;
++  while ((state === 'pending' || state === 'in_progress') && waitedMs < 30_000) {
++    const checkAfter = Math.max(1000, (fin?.processing_info?.check_after_secs ?? 1) * 1000);
++    await sleep(checkAfter);
++    waitedMs += checkAfter;
++    fin = await http.get(`${baseUrl}?command=STATUS&media_id=${encodeURIComponent(String(mediaId))}`);
++    state = fin?.processing_info?.state;
++  }
++  if (state === 'failed') {
++    const reason = fin?.processing_info?.error?.message || 'unknown';
++    throw new ScraperError(`Media processing failed: ${reason}`, 'MEDIA_UPLOAD');
++  }
++  if (state === 'pending' || state === 'in_progress') {
++    throw new ScraperError('Media processing did not finish within 30 s; not attaching', 'MEDIA_UPLOAD');
++  }
++
++  return String(mediaId);
++}

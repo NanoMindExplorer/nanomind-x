@@ -125,6 +125,13 @@ export const GRAPHQL_ENDPOINTS = {
   CreateBookmark: graphqlEndpoint('CreateBookmark', 'aoDbu3RHznuiSkQ9aNM67Q', { method: 'POST' }),
   DeleteBookmark: graphqlEndpoint('DeleteBookmark', 'Wlmlj2-xzyS1GN3a6cj-mQ', { method: 'POST' }),
   BlockedAccountsAll: graphqlEndpoint('BlockedAccountsAll', 'XDSJN_rGtdlynilYFJLYOw', { method: 'POST' }),
+  // Local patch 2026-11-06 (hero #16, v2.1.0): NotificationsTimeline. Query
+  // ID from the engine's generated endpoint table (x-endpoints.generated.js:
+  // 8kmedJD_u653xqEjZIS7yA); the discovery cache holds no entry for this
+  // operation, so the generated table is the live source and the fallback
+  // below only guards a table sync gap. GET, variables { timeline_type,
+  // count, cursor } — see api/notifications.js.
+  NotificationsTimeline: graphqlEndpoint('NotificationsTimeline', '8kmedJD_u653xqEjZIS7yA', { method: 'GET' }),
   CreateFollow: {
     queryId: null,
     operationName: null,

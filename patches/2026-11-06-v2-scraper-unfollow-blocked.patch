@@ -1,0 +1,62 @@
+--- patches/Scraper.js.orig-2026-11-06-v2-unfollow	2026-11-06 02:47:51.896363302 +0700
++++ engine/src/client/Scraper.js	2026-11-06 02:54:05.152210732 +0700
+@@ -406,6 +406,19 @@
+   }
+ 
+   /**
++   * List the accounts this user has blocked.
++   *
++   * Local patch 2026-11-06 (hero #15, v2.0.0): see usersApi.getBlockedUsers.
++   *
++   * @param {number} [count=20]
++   * @returns {Promise<Array<{id: string, screenName: string, name: string}>>}
++   */
++  async getBlockedUsers(count = 20) {
++    const validCount = validateCount(count, 1, 100);
++    return usersApi.getBlockedUsers(this._http, validCount);
++  }
++
++  /**
+    * Get users that a user is following.
+    *
+    * @param {string} userId - Twitter user ID
+@@ -657,6 +670,39 @@
+       body,
+       { 'Content-Type': 'application/x-www-form-urlencoded' },
+     );
++  }
++
++  /**
++   * Unfollow a user by username.
++   *
++   * Local patch 2026-11-06 (hero #14, v2.0.0): mirrors followByUsername
++   * (REST friendships/destroy.json). The built-in Scraper.unfollowUser
++   * routes through usersApi.unfollowUser, whose GraphQL-style body and
++   * `contentType` header key make X answer 404 (verified live 2026-11-06);
++   * the REST destroy endpoint with the follow-style call works (verified
++   * live on @dewata_nft the same day).
++   *
++   * @param {string} username - Twitter handle
++   * @returns {Promise<object>} - Parsed destroy response
++   */
++  async unfollowByUsername(username) {
++    this._requireAuth();
++    const clean = validateUsername(username);
++    const profile = await this.getProfile(clean);
++    const userId = profile?.id;
++    if (!userId) {
++      throw new ScraperError(`Could not resolve @${clean} to a user id`);
++    }
++    const body = new URLSearchParams({
++      user_id: String(userId),
++      include_profile_interstitial_type: '1',
++      skip_status: 'true',
++    }).toString();
++    return this._http.post(
++      'https://x.com/i/api/1.1/friendships/destroy.json',
++      body,
++      { 'Content-Type': 'application/x-www-form-urlencoded' },
++    );
+   }
+ 
+   /**

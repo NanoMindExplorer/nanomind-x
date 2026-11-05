@@ -21,12 +21,14 @@
 //   nanomind-x trends
 //   nanomind-x blocked [--limit N]
 //   nanomind-x me
+//   nanomind-x notifications [--type all|mentions|verified] [--limit N]
 //   nanomind-x dms [--limit N]
 //   nanomind-x dm-read --id <conversation_id> [--limit N]
-//   nanomind-x post --text "..." [--confirm] [--allow-browser-fallback] [--force]
-//   nanomind-x reply --id <tweet_id> --text "..." [--confirm] [--force]
-//   nanomind-x quote --id <tweet_id> --text "..." [--confirm] [--force]
-//   nanomind-x thread --text "part one || part two" [--confirm] [--force]
+//   nanomind-x post --text "..." [--media <image>] [--confirm] [--allow-browser-fallback] [--force]
+//   nanomind-x reply --id <tweet_id> --text "..." [--media <image>] [--confirm] [--force]
+//   nanomind-x quote --id <tweet_id> --text "..." [--media <image>] [--confirm] [--force]
+//   nanomind-x thread --text "part one || part two" [--confirm] [--force]   (POST a thread)
+//   nanomind-x thread --id <tweet_id>                                        (READ a thread)
 //   nanomind-x like --id <tweet_id> [--confirm] [--force]
 //   nanomind-x unlike --id <tweet_id> [--confirm] [--force]
 //   nanomind-x repost --id <tweet_id> [--confirm] [--force]
@@ -61,6 +63,14 @@
 //   mute use the signed GraphQL/REST paths (no browser). Bio uses the
 //   signed REST path first (MCP browser path only as fallback) and needs
 //   the proxy forwarder alive for that fallback.
+// - Media upload (--media on post/reply/quote) is a write: in dry-run mode
+//   NOTHING is uploaded — the preview only reports what would be uploaded.
+//   On --confirm the file is uploaded first (chunked INIT/APPEND/FINALIZE
+//   over the signed path) and its media id is attached to the CreateTweet
+//   call. Only jpg/png/gif/webp, 5 MB images / 15 MB GIFs.
+// - `thread` is two commands sharing one name: `thread --text ...` POSTS a
+//   thread, `thread --id <tweet_id>` READS a thread (focal tweet + replies).
+//   The read path takes no --confirm and touches no ledger.
 // - Search is capped at 1/60 s per wrapper invocation state (file-backed);
 //   --burst overrides and logs the override.
 import { Scraper } from './engine/src/client/index.js';
@@ -87,7 +97,7 @@ const SEARCH_MIN_INTERVAL_MS = 60_000;
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 60_000;
 
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 
 // ---------------------------------------------------------------------------
 // Output + logging
@@ -308,8 +318,34 @@ function parseArgs(argv) {
   return args;
 }
 function usage() {
-  emit({ ok: false, error: { code: 'USAGE', message: 'Usage: nanomind-x <search|profile|timeline|tweet|liked|followers|following|replies|trends|blocked|me|dms|dm-read|post|reply|quote|thread|like|unlike|repost|unrepost|bookmark|unbookmark|follow|unfollow|pin|unpin|block|unblock|mute|unmute|bio|dm|delete|health> [args] [--confirm] [--dry-run] [--allow-browser-fallback] [--force] [--burst] [--mode latest|top|people] [--limit N] [--text ...] [--id ...] [--user ...]', http_status: null, operation: null, retryable: false } });
+  emit({ ok: false, error: { code: 'USAGE', message: 'Usage: nanomind-x <search|profile|timeline|tweet|liked|followers|following|replies|trends|blocked|me|notifications|dms|dm-read|post|reply|quote|thread|like|unlike|repost|unrepost|bookmark|unbookmark|follow|unfollow|pin|unpin|block|unblock|mute|unmute|bio|dm|delete|health> [args] [--confirm] [--dry-run] [--allow-browser-fallback] [--force] [--burst] [--mode latest|top|people] [--limit N] [--text ...] [--id ...] [--user ...] [--media <image>] [--type all|mentions|verified]', http_status: null, operation: null, retryable: false } });
   process.exit(2);
+}
+
+// ---------------------------------------------------------------------------
+// Media argument validation (post/reply/quote --media)
+// ---------------------------------------------------------------------------
+// Mirrors the engine limits (api/media.js): jpg/png/webp <= 5 MB, gif <=
+// 15 MB. Checked here so a bad --media fails fast with exit 2 before any
+// network call; the engine re-validates on the real upload.
+const MEDIA_EXTS = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp' };
+const MEDIA_MAX = { 'image/jpeg': 5 * 1024 * 1024, 'image/png': 5 * 1024 * 1024, 'image/webp': 5 * 1024 * 1024, 'image/gif': 15 * 1024 * 1024 };
+function resolveMediaArg(args, operation) {
+  const mediaPath = args.media;
+  if (!mediaPath || typeof mediaPath !== 'string') return null;
+  if (!fs.existsSync(mediaPath)) {
+    fail('USAGE', `Media file not found: ${mediaPath}`, { operation, retryable: false });
+  }
+  const ext = path.extname(mediaPath).toLowerCase();
+  const mimeType = MEDIA_EXTS[ext];
+  if (!mimeType) {
+    fail('USAGE', `Unsupported media type "${ext || '(no extension)'}": only jpg, png, gif and webp are supported.`, { operation, retryable: false });
+  }
+  const bytes = fs.statSync(mediaPath).size;
+  if (bytes > MEDIA_MAX[mimeType]) {
+    fail('USAGE', `Media file too large: ${bytes} bytes exceeds the ${MEDIA_MAX[mimeType]} byte limit for ${mimeType}.`, { operation, retryable: false });
+  }
+  return { path: mediaPath, bytes, mimeType };
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +576,25 @@ async function cmdMe(args) {
   }
 }
 
+async function cmdNotifications(args) {
+  const type = String(args.type || 'all').toLowerCase();
+  if (!['all', 'mentions', 'verified'].includes(type)) usage();
+  const limit = Math.max(1, Math.min(50, Number(args.limit || 20) || 20));
+  const t0 = Date.now();
+  const scraper = await makeScraper();
+  try {
+    const items = await scraper.getNotifications({ type, count: limit });
+    logLine({ command: 'notifications', operation: 'notifications', status: 'ok', ms: Date.now() - t0, count: items.length, rateLimitRemaining: lastRate.remaining });
+    emit({ ok: true, data: items, meta: { type, count: items.length } });
+  } catch (e) {
+    const status = httpStatusOf(e);
+    logLine({ command: 'notifications', operation: 'notifications', status: 'error', ms: Date.now() - t0, httpStatus: status });
+    if (status === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'notifications', retryable: true });
+    if (status === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'notifications', retryable: false });
+    fail('UPSTREAM', `Notifications read failed: ${e.message}`, { http_status: status, operation: 'notifications', retryable: status === 404 });
+  }
+}
+
 async function cmdDms(args) {
   const limit = Math.max(1, Math.min(100, Number(args.limit || 10) || 10));
   const t0 = Date.now();
@@ -584,13 +639,14 @@ async function cmdPost(args) {
   const confirm = args.confirm === true || args.confirm === 'true';
   const allowBrowser = args['allow-browser-fallback'] === true || args['allow-browser-fallback'] === 'true';
   const force = args.force === true || args.force === 'true';
+  const media = resolveMediaArg(args, 'post');
   const key = sha256(text);
   const dup = ledgerCheck('post', key);
   if (force) warn('FORCE used: idempotency check bypassed. --force requires Iman\'s explicit approval.');
   if (dup && !force) {
     fail('DUPLICATE', `Refusing duplicate post: identical text was already posted (tweet ${dup.tweetId || 'unknown'}, ${new Date(dup.ts).toISOString()}). Pass --force only with Iman's explicit approval.`, { operation: 'post', retryable: false });
   }
-  const request = { endpoint: 'CreateTweet', operation: 'post', variables: { tweet_text: text, dark_request: false } };
+  const request = { endpoint: 'CreateTweet', operation: 'post', variables: { tweet_text: text, dark_request: false }, ...(media ? { media: { file: media.path, bytes: media.bytes, mimeType: media.mimeType, note: 'NOT uploaded in dry-run; on --confirm the file is uploaded first, then attached as media_ids' } } : {}) };
   if (!confirm) {
     emit({ ok: true, dryRun: true, request, idempotency: { duplicate: Boolean(dup), within24h: Boolean(dup), key } });
     return;
@@ -598,11 +654,17 @@ async function cmdPost(args) {
   const t0 = Date.now();
   const scraper = await makeScraper();
   try {
-    const tweet = await scraper.sendTweet(text);
+    let mediaIds = [];
+    let mediaInfo = null;
+    if (media) {
+      mediaInfo = await scraper.uploadMedia(media.path);
+      mediaIds = [mediaInfo.mediaId];
+    }
+    const tweet = await scraper.sendTweet(text, mediaIds.length ? { mediaIds } : {});
     const tweetId = tweet?.id || null;
-    ledgerAppend({ operation: 'post', key, textHash: key, tweetId, path: 'graphql' });
-    logLine({ command: 'post', operation: 'post', status: 'ok', ms: Date.now() - t0, path: 'graphql', tweetId });
-    emit({ ok: true, path: 'graphql', tweetId, data: tweet });
+    ledgerAppend({ operation: 'post', key, textHash: key, tweetId, path: 'graphql', ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}) });
+    logLine({ command: 'post', operation: 'post', status: 'ok', ms: Date.now() - t0, path: 'graphql', tweetId, ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}) });
+    emit({ ok: true, path: 'graphql', tweetId, ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}), data: tweet });
   } catch (e) {
     const status = httpStatusOf(e);
     const graphQL226 = is226(e);
@@ -618,7 +680,9 @@ async function cmdPost(args) {
         const tweetId = extractTweetIdFromMcp(res);
         ledgerAppend({ operation: 'post', key, textHash: key, tweetId, path: 'browser' });
         logLine({ command: 'post', operation: 'post', status: 'ok', ms: Date.now() - t0, path: 'browser', tweetId });
-        emit({ ok: true, path: 'browser', tweetId, note: tweetId ? undefined : 'Posted via browser; tweet id not parsed — verify on the timeline.', data: res });
+        // The browser path posts text only: an uploaded media file is NOT
+        // attached by the fallback — say so plainly instead of implying it was.
+        emit({ ok: true, path: 'browser', tweetId, ...(mediaInfo ? { mediaId: mediaInfo.mediaId, mediaAttached: false, note: 'Posted via browser fallback; the uploaded media was NOT attached (browser path is text-only).' } : {}), ...(tweetId ? {} : { note: 'Posted via browser; tweet id not parsed — verify on the timeline.' }), data: res });
       } catch (be) {
         fail('UPSTREAM', `GraphQL post failed (${e.message}) and browser fallback also failed: ${be.message}`, { http_status: status, operation: 'post', retryable: false });
       }
@@ -636,13 +700,14 @@ async function cmdReply(args) {
   if (!id || typeof id !== 'string' || !text || typeof text !== 'string') usage();
   const confirm = args.confirm === true || args.confirm === 'true';
   const force = args.force === true || args.force === 'true';
+  const media = resolveMediaArg(args, 'reply');
   const key = sha256(id + '\n' + text);
   const dup = ledgerCheck('reply', key);
   if (force) warn('FORCE used: idempotency check bypassed. --force requires Iman\'s explicit approval.');
   if (dup && !force) {
     fail('DUPLICATE', `Refusing duplicate reply: identical reply to ${id} was already posted (tweet ${dup.tweetId || 'unknown'}, ${new Date(dup.ts).toISOString()}). Pass --force only with Iman's explicit approval.`, { operation: 'reply', retryable: false });
   }
-  const request = { endpoint: 'CreateTweet', operation: 'reply', variables: { tweet_text: text, reply: { in_reply_to_tweet_id: id }, dark_request: false } };
+  const request = { endpoint: 'CreateTweet', operation: 'reply', variables: { tweet_text: text, reply: { in_reply_to_tweet_id: id }, dark_request: false }, ...(media ? { media: { file: media.path, bytes: media.bytes, mimeType: media.mimeType, note: 'NOT uploaded in dry-run; on --confirm the file is uploaded first, then attached as media_ids' } } : {}) };
   if (!confirm) {
     emit({ ok: true, dryRun: true, request, idempotency: { duplicate: Boolean(dup), within24h: Boolean(dup), key } });
     return;
@@ -650,11 +715,17 @@ async function cmdReply(args) {
   const t0 = Date.now();
   const scraper = await makeScraper();
   try {
-    const tweet = await scraper.sendTweet(text, { replyTo: id });
+    let mediaIds = [];
+    let mediaInfo = null;
+    if (media) {
+      mediaInfo = await scraper.uploadMedia(media.path);
+      mediaIds = [mediaInfo.mediaId];
+    }
+    const tweet = await scraper.sendTweet(text, { replyTo: id, ...(mediaIds.length ? { mediaIds } : {}) });
     const tweetId = tweet?.id || null;
-    ledgerAppend({ operation: 'reply', key, textHash: key, tweetId, inReplyTo: id, path: 'graphql' });
-    logLine({ command: 'reply', operation: 'reply', status: 'ok', ms: Date.now() - t0, path: 'graphql', tweetId, inReplyTo: id });
-    emit({ ok: true, path: 'graphql', tweetId, inReplyTo: id, data: tweet });
+    ledgerAppend({ operation: 'reply', key, textHash: key, tweetId, inReplyTo: id, path: 'graphql', ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}) });
+    logLine({ command: 'reply', operation: 'reply', status: 'ok', ms: Date.now() - t0, path: 'graphql', tweetId, inReplyTo: id, ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}) });
+    emit({ ok: true, path: 'graphql', tweetId, inReplyTo: id, ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}), data: tweet });
   } catch (e) {
     const status = httpStatusOf(e);
     const graphQL226 = is226(e);
@@ -857,13 +928,14 @@ async function cmdQuote(args) {
   if (!id || typeof id !== 'string' || !text || typeof text !== 'string') usage();
   const confirm = args.confirm === true || args.confirm === 'true';
   const force = args.force === true || args.force === 'true';
+  const media = resolveMediaArg(args, 'quote');
   const key = sha256(id + '\n' + text);
   const dup = ledgerCheck('quote', key);
   if (force) warn('FORCE used: idempotency check bypassed. --force requires Iman\'s explicit approval.');
   if (dup && !force) {
     fail('DUPLICATE', `Refusing duplicate quote: identical quote of ${id} was already posted (tweet ${dup.tweetId || 'unknown'}, ${new Date(dup.ts).toISOString()}). Pass --force only with Iman's explicit approval.`, { operation: 'quote', retryable: false });
   }
-  const request = { endpoint: 'CreateTweet', operation: 'quote', variables: { tweet_text: text, quoted_tweet_id: id, dark_request: false } };
+  const request = { endpoint: 'CreateTweet', operation: 'quote', variables: { tweet_text: text, quoted_tweet_id: id, dark_request: false }, ...(media ? { media: { file: media.path, bytes: media.bytes, mimeType: media.mimeType, note: 'NOT uploaded in dry-run; on --confirm the file is uploaded first, then attached as media_ids' } } : {}) };
   if (!confirm) {
     emit({ ok: true, dryRun: true, request, idempotency: { duplicate: Boolean(dup), within24h: Boolean(dup), key } });
     return;
@@ -871,11 +943,17 @@ async function cmdQuote(args) {
   const t0 = Date.now();
   const scraper = await makeScraper();
   try {
-    const tweet = await scraper.sendQuoteTweet(text, id);
+    let mediaIds = [];
+    let mediaInfo = null;
+    if (media) {
+      mediaInfo = await scraper.uploadMedia(media.path);
+      mediaIds = [mediaInfo.mediaId];
+    }
+    const tweet = await scraper.sendQuoteTweet(text, id, mediaIds);
     const tweetId = tweet?.id || null;
-    ledgerAppend({ operation: 'quote', key, textHash: key, tweetId, quotedTweetId: id, path: 'graphql' });
-    logLine({ command: 'quote', operation: 'quote', status: 'ok', ms: Date.now() - t0, path: 'graphql', tweetId, quotedTweetId: id });
-    emit({ ok: true, path: 'graphql', tweetId, quotedTweetId: id, data: tweet });
+    ledgerAppend({ operation: 'quote', key, textHash: key, tweetId, quotedTweetId: id, path: 'graphql', ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}) });
+    logLine({ command: 'quote', operation: 'quote', status: 'ok', ms: Date.now() - t0, path: 'graphql', tweetId, quotedTweetId: id, ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}) });
+    emit({ ok: true, path: 'graphql', tweetId, quotedTweetId: id, ...(mediaInfo ? { mediaId: mediaInfo.mediaId } : {}), data: tweet });
   } catch (e) {
     const status = httpStatusOf(e);
     const graphQL226 = is226(e);
@@ -1058,6 +1136,33 @@ async function cmdDm(args) {
 }
 
 async function cmdThread(args) {
+  // `thread` is two commands sharing one name (v2.1.0): `--id` READS a
+  // thread (focal tweet + replies, no ledger, no --confirm), `--text`
+  // POSTS a thread. Both flags or neither is a usage error.
+  if (args.id && !args.text) return cmdThreadRead(args);
+  if (args.text && !args.id) return cmdThreadPost(args);
+  usage();
+}
+
+async function cmdThreadRead(args) {
+  const id = args.id;
+  if (!id || typeof id !== 'string') usage();
+  const t0 = Date.now();
+  const scraper = await makeScraper();
+  try {
+    const thread = await scraper.getThread(id);
+    logLine({ command: 'thread', operation: 'thread-read', status: 'ok', ms: Date.now() - t0, tweetId: id, entries: thread.entries.length, rateLimitRemaining: lastRate.remaining });
+    emit({ ok: true, data: thread, meta: { focalTweetId: thread.focalTweetId, entries: thread.entries.length, hasMore: thread.hasMore } });
+  } catch (e) {
+    const status = httpStatusOf(e);
+    logLine({ command: 'thread', operation: 'thread-read', status: 'error', ms: Date.now() - t0, httpStatus: status });
+    if (status === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'thread-read', retryable: true });
+    if (status === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'thread-read', retryable: false });
+    fail('UPSTREAM', `Thread read failed: ${e.message}`, { http_status: status, operation: 'thread-read', retryable: status === 404 });
+  }
+}
+
+async function cmdThreadPost(args) {
   const text = args.text;
   if (!text || typeof text !== 'string') usage();
   const parts = text.split('||').map((p) => p.trim());
@@ -1184,6 +1289,7 @@ try {
   else if (cmd === 'trends') await cmdTrends(args);
   else if (cmd === 'blocked') await cmdBlocked(args);
   else if (cmd === 'me') await cmdMe(args);
+  else if (cmd === 'notifications') await cmdNotifications(args);
   else if (cmd === 'dms') await cmdDms(args);
   else if (cmd === 'dm-read') await cmdDmRead(args);
   else if (cmd === 'post') await cmdPost(args);

@@ -1,0 +1,11 @@
+--- patches/graphqlQueries.js.orig-2026-11-06-v2	2026-11-05 19:41:47.494795683 +0000
++++ engine/src/client/api/graphqlQueries.js	2026-11-05 19:41:54.131216363 +0000
+@@ -122,6 +122,8 @@
+   UnfavoriteTweet: graphqlEndpoint('UnfavoriteTweet', 'ZYKSe-w7KEslx3JhSIk5LA', { method: 'POST' }),
+   CreateRetweet: graphqlEndpoint('CreateRetweet', 'mbRO74GrOvSfRcJnlMapnQ', { method: 'POST' }),
+   DeleteRetweet: graphqlEndpoint('DeleteRetweet', 'iQtK4dl5hBmXewYZCnMPAA', { method: 'POST' }),
++  CreateBookmark: graphqlEndpoint('CreateBookmark', 'aoDbu3RHznuiSkQ9aNM67Q', { method: 'POST' }),
++  DeleteBookmark: graphqlEndpoint('DeleteBookmark', 'Wlmlj2-xzyS1GN3a6cj-mQ', { method: 'POST' }),
+   CreateFollow: {
+     queryId: null,
+     operationName: null,

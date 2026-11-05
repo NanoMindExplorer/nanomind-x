@@ -1,0 +1,94 @@
+--- patches/Scraper.js.orig-2026-11-06	2026-11-06 02:25:51.721816607 +0700
++++ engine/src/client/Scraper.js	2026-11-06 02:31:44.530221060 +0700
+@@ -597,6 +597,91 @@
+     return tweetsApi.unretweet(this._http, validId);
+   }
+ 
++  /**
++   * Follow a user by screen name.
++   *
++   * Local patch 2026-11-06 (hero #10): the Scraper class had no follow
++   * method — follow lived only in the scrapers-layer engagement module
++   * (TwitterHttpClient, unsigned) and in the MCP browser path. This
++   * method uses the REST friendships/create endpoint over the same signed
++   * SimpleHttp path as tweets (cookies + ct0 + x-client-transaction-id),
++   * resolving the screen name via getProfile first.
++   *
++   * @param {string} username - Screen name without `@`
++   * @returns {Promise<object>} - Parsed friendships/create response
++   */
++  async followByUsername(username) {
++    this._requireAuth();
++    const clean = validateUsername(username);
++    const profile = await this.getProfile(clean);
++    const userId = profile?.id;
++    if (!userId) {
++      throw new ScraperError(`Could not resolve @${clean} to a user id`);
++    }
++    const body = new URLSearchParams({
++      user_id: String(userId),
++      include_profile_interstitial_type: '1',
++      skip_status: 'true',
++    }).toString();
++    return this._http.post(
++      'https://x.com/i/api/1.1/friendships/create.json',
++      body,
++      { 'Content-Type': 'application/x-www-form-urlencoded' },
++    );
++  }
++
++  /**
++   * Pin a tweet to the profile timeline.
++   *
++   * Local patch 2026-11-06 (hero #11): mirrors followByUsername — the
++   * Scraper class had no pin method (pin lived only in the scrapers-layer
++   * engagement module and the MCP browser path). Uses REST
++   * account/pin_tweet over the same signed SimpleHttp path as tweets.
++   *
++   * @param {string} id - Tweet ID to pin
++   * @returns {Promise<object>} - Parsed pin_tweet response
++   */
++  async pinTweet(id) {
++    this._requireAuth();
++    const validId = validateTweetId(id);
++    const body = new URLSearchParams({
++      tweet_mode: 'extended',
++      id: validId,
++    }).toString();
++    return this._http.post(
++      'https://x.com/i/api/1.1/account/pin_tweet.json',
++      body,
++      { 'Content-Type': 'application/x-www-form-urlencoded' },
++    );
++  }
++
++  /**
++   * Update the profile description (bio).
++   *
++   * Local patch 2026-11-06 (hero #12): the Scraper class had no profile
++   * update — bio editing lived only in the MCP browser path
++   * (x_update_profile), which timed out navigating to settings/profile.
++   * The REST account/update_profile endpoint works over the same signed
++   * SimpleHttp path as tweets. Verified live 2026-11-06: bio set on
++   * @Shiba_Nakamoto in ~1 s. Only `description` is supported here; name,
++   * location and website still need the browser path.
++   *
++   * @param {string} bio - New profile description, max 160 characters
++   * @returns {Promise<object>} - Parsed update_profile response
++   */
++  async updateProfileBio(bio) {
++    this._requireAuth();
++    if (typeof bio !== 'string' || bio.length > 160) {
++      throw new ScraperError(`Bio must be a string of at most 160 characters (got ${String(bio).length})`);
++    }
++    const body = new URLSearchParams({ description: bio }).toString();
++    return this._http.post(
++      'https://x.com/i/api/1.1/account/update_profile.json',
++      body,
++      { 'Content-Type': 'application/x-www-form-urlencoded' },
++    );
++  }
++
+   // =========================================================================
+   // Search
+   // =========================================================================

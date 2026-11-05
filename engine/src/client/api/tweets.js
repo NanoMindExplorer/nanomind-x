@@ -86,6 +86,89 @@ export async function getTweet(http, tweetId) {
 }
 
 /**
+ * Get a full conversation thread for a tweet: the tweet itself plus its
+ * replies, in order.
+ *
+ * Local patch 2026-11-06 (hero #18, v2.1.0): reuses the same TweetDetail
+ * call as getTweet. The response mixes three entry kinds: `tweet-*` entries
+ * (the focal tweet, plus any ancestors above it), `conversationthread-*`
+ * modules whose items are the replies in order, and
+ * `tweetdetailrelatedtweets-*` modules (related tweets — NOT part of the
+ * conversation, skipped). Single page: the first page of replies the
+ * endpoint returns; `hasMore` reports whether a bottom cursor was present.
+ *
+ * @param {Object} http - HTTP client with get/post methods
+ * @param {string} tweetId - Numeric tweet ID
+ * @returns {Promise<{ focalTweetId: string, entries: Array<{ role: string, tweet: Tweet }>, hasMore: boolean }>}
+ * @throws {NotFoundError}
+ */
+export async function getThread(http, tweetId) {
+  const endpoint = GRAPHQL_ENDPOINTS.TweetDetail;
+  const variables = {
+    focalTweetId: tweetId,
+    with_rux_injections: false,
+    includePromotedContent: false,
+    withCommunity: true,
+    withQuickPromoteEligibilityTweetFields: true,
+    withBirdwatchNotes: true,
+    withVoice: true,
+    withV2Timeline: true,
+  };
+  const url = buildGraphQLUrl(endpoint, variables);
+  const data = await http.get(url);
+
+  const instructions =
+    data?.data?.threaded_conversation_with_injections_v2?.instructions || [];
+  const entries = [];
+  let hasMore = false;
+  let focalSeen = false;
+
+  const pushTweetEntry = (entry, role) => {
+    const tweetResult = entry?.content?.itemContent?.tweet_results?.result;
+    if (!tweetResult) return;
+    let result = tweetResult;
+    if (result.__typename === 'TweetWithVisibilityResults' && result.tweet) {
+      result = result.tweet;
+    }
+    const tweet = Tweet.fromGraphQL(result);
+    if (tweet) entries.push({ role, tweet });
+  };
+
+  for (const instruction of instructions) {
+    if (instruction.type !== 'TimelineAddEntries') continue;
+    for (const entry of instruction.entries || []) {
+      const entryId = entry.entryId || '';
+      if (entryId.startsWith('cursor-bottom-')) {
+        hasMore = true;
+        continue;
+      }
+      if (entryId.startsWith('tweetdetailrelatedtweets-')) continue;
+      if (entryId.startsWith('tweet-')) {
+        const id = entryId.slice('tweet-'.length);
+        const role = id === tweetId ? 'focal' : focalSeen ? 'reply' : 'ancestor';
+        if (id === tweetId) focalSeen = true;
+        pushTweetEntry(entry, role);
+        continue;
+      }
+      if (entryId.startsWith('conversationthread-')) {
+        for (const item of entry.content?.items || []) {
+          const sub = { content: item?.item };
+          pushTweetEntry(sub, 'reply');
+        }
+      }
+    }
+  }
+
+  if (!focalSeen) {
+    throw new NotFoundError(`Tweet "${tweetId}" not found`, 'TWEET_NOT_FOUND', {
+      endpoint: 'TweetDetail',
+    });
+  }
+
+  return { focalTweetId: tweetId, entries, hasMore };
+}
+
+/**
  * Get tweets from a user's timeline.
  *
  * @param {Object} http

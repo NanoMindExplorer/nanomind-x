@@ -1,0 +1,255 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
+/**
+ * nanomind-x Client — Notifications API
+ *
+ * Reads the authenticated user's notifications (All / Mentions / Verified
+ * tabs) through the `NotificationsTimeline` GraphQL operation.
+ *
+ * Local patch 2026-11-06 (hero #16, v2.1.0): the scrapers layer already had
+ * a notifications module (src/scrapers/twitter/http/notifications.js) built
+ * on the unsigned TwitterHttpClient, whose session validation is broken
+ * (verify_credentials 404s) — so it was never usable from this tool. This
+ * module re-implements the same operation and entry parsing on the signed
+ * SimpleHttp path (cookies + ct0 + x-client-transaction-id), using the
+ * client-layer Tweet/Profile models that understand the current typed
+ * response shape (result.core, not legacy).
+ *
+ * The timeline mixes two entry kinds. Aggregated notifications
+ * (`notification-*`, e.g. "A and 3 others liked your post") carry an icon,
+ * a rich-text message, the acting users, and the target tweets. Tweet
+ * entries (`tweet-*`) are replies, mentions, and quotes rendered as the
+ * tweet itself, with the reason in `clientEventInfo.element`.
+ *
+ * Query ID: from the engine's generated endpoint table
+ * (x-endpoints.generated.js: 8kmedJD_u653xqEjZIS7yA); the discovery cache
+ * holds no entry for this operation. Variables mirror the web client:
+ * { timeline_type: 'All'|'Mentions'|'Verified', count }.
+ *
+ * @author nich (@nichxbt) - https://github.com/nirholas
+ * @license Apache-2.0
+ */
+
+import { GRAPHQL_ENDPOINTS, buildGraphQLUrl } from './graphqlQueries.js';
+import { Tweet } from '../models/Tweet.js';
+import { Profile } from '../models/Profile.js';
+import { parseTimelineEntries } from './parsers.js';
+
+/** Notification icon id to event type */
+const ICON_TYPES = {
+  heart_icon: 'like',
+  retweet_icon: 'retweet',
+  person_icon: 'follow',
+  reply_icon: 'reply',
+  mention_icon: 'mention',
+};
+
+/** `clientEventInfo.element` values for tweet entries */
+const ELEMENT_TYPES = [
+  [/quoted/i, 'quote'],
+  [/replied|reply/i, 'reply'],
+  [/mention/i, 'mention'],
+  [/retweet/i, 'retweet'],
+  [/like|favorite/i, 'like'],
+  [/follow/i, 'follow'],
+];
+
+/** Fallback classification from the rich-text message (English + Indonesian —
+ * the account's notifications arrive localized, e.g. "mistor menyukai
+ * postingan Anda"). */
+const MESSAGE_TYPES = [
+  [/\bfollowed you\b|\bmengikuti Anda\b/i, 'follow'],
+  [/\bliked\b|\bmenyukai\b/i, 'like'],
+  [/\brepost|retweet|\bme-repost\b/i, 'retweet'],
+  [/\bquoted\b|\bmengutip\b/i, 'quote'],
+  [/\breplied\b|\bmembalas\b/i, 'reply'],
+  [/\bmentioned\b|\bmenyebut\b/i, 'mention'],
+];
+
+function classify(table, value) {
+  if (!value) return null;
+  for (const [re, type] of table) {
+    if (re.test(value)) return type;
+  }
+  return null;
+}
+
+function toISODate(raw) {
+  if (raw == null || raw === '') return null;
+  // The live timeline sends timestamp_ms as an ISO string
+  // ("2026-11-05T21:16:20.833Z"), not epoch milliseconds — both shapes
+  // are accepted.
+  const d =
+    typeof raw === 'string' && /^\d+$/.test(raw) ? new Date(Number(raw)) : new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function unwrapTweetResult(result) {
+  if (!result) return null;
+  if (result.__typename === 'TweetWithVisibilityResults' && result.tweet) {
+    return result.tweet;
+  }
+  return result;
+}
+
+function parseUserResult(result) {
+  if (!result) return null;
+  const profile = Profile.fromGraphQL(result);
+  if (!profile || !profile.username) return null;
+  return {
+    id: profile.id || null,
+    username: profile.username,
+    name: profile.name || null,
+    avatar: profile.avatar || null,
+    verified: Boolean(profile.verified),
+  };
+}
+
+/**
+ * Parse an aggregated `notification-*` entry.
+ *
+ * Live shape (verified 2026-11-06): the notification fields sit DIRECTLY on
+ * `itemContent` — notification_icon, notification_url, rich_message,
+ * template { from_users, target_objects }, timestamp_ms, id. The
+ * `notification_results.result` wrapper the scrapers-layer parser expects
+ * no longer appears in the response, so it is only kept as a fallback.
+ *
+ * @param {Object} entry Timeline entry
+ * @returns {Object|null} Event
+ */
+function parseAggregatedNotification(entry) {
+  const itemContent = entry?.content?.itemContent;
+  const raw = itemContent?.notification_results?.result ?? itemContent;
+  if (!raw || (!raw.template && !raw.rich_message && !raw.notification_icon)) return null;
+
+  const template = raw.template ?? {};
+  const users = (template.from_users ?? [])
+    .map((u) => parseUserResult(u?.user_results?.result))
+    .filter(Boolean);
+  const tweets = (template.target_objects ?? [])
+    .map((t) => {
+      const tweet = Tweet.fromGraphQL(unwrapTweetResult(t?.tweet_results?.result));
+      return tweet && tweet.id ? tweet : null;
+    })
+    .filter(Boolean);
+
+  const message = raw.rich_message?.text ?? raw.message?.text ?? '';
+  const type =
+    ICON_TYPES[raw.notification_icon] ??
+    classify(MESSAGE_TYPES, message) ??
+    'other';
+
+  return {
+    id: raw.id ?? raw.rest_id ?? entry.entryId ?? null,
+    type,
+    timestamp: toISODate(raw.timestamp_ms),
+    message,
+    users,
+    tweets,
+    tweet: tweets[0] ?? null,
+    url: raw.notification_url?.url ?? null,
+    icon: raw.notification_icon ?? null,
+  };
+}
+
+/**
+ * Parse a `tweet-*` entry (reply / mention / quote rendered as a tweet).
+ *
+ * @param {Object} entry Timeline entry
+ * @returns {Object|null} Event
+ */
+function parseTweetNotification(entry) {
+  const tweet = Tweet.fromGraphQL(
+    unwrapTweetResult(entry?.content?.itemContent?.tweet_results?.result),
+  );
+  if (!tweet || !tweet.id) return null;
+
+  const element =
+    entry.clientEventInfo?.element ?? entry.content?.clientEventInfo?.element ?? '';
+  const type =
+    classify(ELEMENT_TYPES, element) ??
+    (tweet.quotedStatusId ? 'quote' : tweet.isReply ? 'reply' : 'mention');
+
+  // The Tweet model carries only username + userId for the author (no
+  // display name / avatar / verified flag), so the author block stays minimal.
+  const author = tweet.username
+    ? {
+        id: tweet.userId || null,
+        username: tweet.username,
+      }
+    : null;
+
+  return {
+    id: entry.entryId ?? `tweet-${tweet.id}`,
+    type,
+    timestamp: tweet.timestamp ? new Date(tweet.timestamp).toISOString() : null,
+    message: tweet.text ?? '',
+    users: author ? [author] : [],
+    tweets: [tweet],
+    tweet,
+    url: author ? `https://x.com/${author.username}/status/${tweet.id}` : null,
+    icon: null,
+  };
+}
+
+/**
+ * Parse one timeline entry into a notification event.
+ *
+ * @param {Object} entry Timeline entry
+ * @returns {Object|null} `{ id, type, timestamp, message, users, tweets, tweet, url }`
+ */
+export function parseNotificationEntry(entry) {
+  const itemType =
+    entry?.content?.itemContent?.itemType ??
+    entry?.content?.itemContent?.__typename ??
+    '';
+  if (itemType === 'TimelineNotification' || entry?.content?.itemContent?.notification_results) {
+    return parseAggregatedNotification(entry);
+  }
+  if (itemType === 'TimelineTweet' || entry?.content?.itemContent?.tweet_results) {
+    return parseTweetNotification(entry);
+  }
+  return null;
+}
+
+/**
+ * Read the authenticated user's notifications (single page, newest first).
+ *
+ * @param {Object} http - HTTP client with get/post methods
+ * @param {Object} [options={}]
+ * @param {'all'|'mentions'|'verified'} [options.type='all'] Which tab
+ * @param {number} [options.count=20] Maximum events to return
+ * @returns {Promise<Array>} Notification events, newest first
+ */
+export async function getNotifications(http, options = {}) {
+  const type = String(options.type || 'all').toLowerCase();
+  const timelineType = { all: 'All', mentions: 'Mentions', verified: 'Verified' }[type] || 'All';
+  const count = Math.max(1, Math.min(50, Number(options.count || 20) || 20));
+
+  const endpoint = GRAPHQL_ENDPOINTS.NotificationsTimeline;
+  const url = buildGraphQLUrl(endpoint, { timeline_type: timelineType, count });
+  const data = await http.get(url);
+
+  const { entries } = parseTimelineEntries(
+    data,
+    'data.viewer_v2.user_results.result.notification_timeline.timeline',
+  );
+
+  const items = [];
+  for (const entry of entries) {
+    if (entry.entryId?.startsWith('cursor-')) continue;
+    // TimelineTimelineModule entries group several notifications; expand them.
+    if (entry.content?.entryType === 'TimelineTimelineModule') {
+      for (const item of entry.content?.items || []) {
+        const sub = { entryId: item?.entryId, content: item?.item, clientEventInfo: item?.item?.clientEventInfo };
+        const event = parseNotificationEntry(sub);
+        if (event) items.push(event);
+      }
+      continue;
+    }
+    const event = parseNotificationEntry(entry);
+    if (event) items.push(event);
+    if (items.length >= count) break;
+  }
+
+  return items.slice(0, count);
+}

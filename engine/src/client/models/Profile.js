@@ -144,10 +144,16 @@ export class Profile {
     profile.isBlueVerified = raw.is_blue_verified || false;
     profile.protected = raw.privacy?.protected ?? legacy.protected ?? false;
 
-    // Pinned tweets
+    // Pinned tweets. The live UserByScreenName response carries them under
+    // pinned_items.tweet_ids_str (verified 2026-11-06: ["2118452090288951494"]
+    // for @Shiba_Nakamoto) — the old pinned_tweet_ids_str field name no
+    // longer appears, and `legacy` is gone entirely, which is why this read
+    // [] even while a pin was live. Both spellings are tried, old first.
+    // Local patch 2026-11-06 (hero #19, v2.1.0).
     const pinned =
       legacy.pinned_tweet_ids_str ||
       raw.pinned_items?.pinned_tweet_ids_str ||
+      raw.pinned_items?.tweet_ids_str ||
       [];
     profile.pinnedTweetIds = Array.isArray(pinned) ? pinned.slice() : [];
 

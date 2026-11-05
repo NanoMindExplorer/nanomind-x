@@ -16,6 +16,8 @@ import * as searchApi from './api/search.js';
 import * as trendsApi from './api/trends.js';
 import * as listsApi from './api/lists.js';
 import * as dmsApi from './api/dms.js';
+import * as notificationsApi from './api/notifications.js';
+import * as mediaApi from './api/media.js';
 import { ScraperError, AuthenticationError } from './errors.js';
 import { validateUsername, validateTweetId, validateTweetText, validateCount } from './validation.js';
 import { TokenManager } from './auth/TokenManager.js';
@@ -198,6 +200,65 @@ class SimpleHttp {
       throw describeHttpFailure(res, url, this._authenticated);
     }
     return res.json();
+  }
+
+  /**
+   * Make a multipart/form-data POST request (media upload).
+   *
+   * Local patch 2026-11-06 (hero #17, v2.1.0): the JSON post() above cannot
+   * send multipart bodies — it forces Content-Type: application/json. This
+   * method builds the same signed headers but lets fetch set the multipart
+   * boundary from the FormData body, and tolerates an empty (204) response
+   * (the APPEND step answers with no body). x-client-transaction-id is
+   * attached best-effort, as in get/post.
+   *
+   * @param {string} url
+   * @param {FormData} form
+   * @param {Object} [extraHeaders]
+   * @returns {Promise<any>} Parsed JSON, or {} for an empty response
+   */
+  async postForm(url, form, extraHeaders = {}) {
+    await this._tokenManager.getGuestToken();
+    const headers = {
+      ...this._tokenManager.getHeaders(this._authenticated),
+      ...extraHeaders,
+    };
+    delete headers['Content-Type'];
+    if (this._cookies) {
+      headers['Cookie'] = this._cookies;
+    }
+    // The media upload host refuses requests without an Origin/Referer
+    // (HTTP 403 on /i/media/upload.json; verified 2026-11-06 — the same
+    // INIT with Referer + Origin answers 202 with a media id). The /1.1/
+    // endpoint tolerates their absence, but sending them always is harmless.
+    if (!headers.Referer) headers.Referer = 'https://x.com/';
+    if (!headers.Origin) headers.Origin = 'https://x.com';
+
+    let req = { method: 'POST', headers, body: form };
+    if (this._transform) {
+      const transformed = this._transform(req);
+      if (transformed) req = transformed;
+    }
+
+    try {
+      const mod = await _getTransactionIdModule();
+      const txid = mod ? await mod.getTransactionId('POST', url) : null;
+      if (txid) req.headers['x-client-transaction-id'] = txid;
+    } catch {
+      // Signing failed; send unsigned, as before the patch.
+    }
+
+    const res = await this._fetchFn(url, req);
+    if (!res.ok) {
+      throw describeHttpFailure(res, url, this._authenticated);
+    }
+    const text = await res.text();
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { _raw: text };
+    }
   }
 }
 
@@ -467,6 +528,38 @@ export class Scraper {
   async getTweet(id) {
     const validId = validateTweetId(id);
     return tweetsApi.getTweet(this._http, validId);
+  }
+
+  /**
+   * Get a full conversation thread for a tweet.
+   *
+   * Local patch 2026-11-06 (hero #18, v2.1.0): see tweetsApi.getThread —
+   * the focal tweet plus its replies in order, from the same TweetDetail
+   * call getTweet uses. Single page; `hasMore` reports a bottom cursor.
+   *
+   * @param {string} id - Tweet ID
+   * @returns {Promise<{ focalTweetId: string, entries: Array<{ role: string, tweet: import('./models/Tweet.js').Tweet }>, hasMore: boolean }>}
+   */
+  async getThread(id) {
+    const validId = validateTweetId(id);
+    return tweetsApi.getThread(this._http, validId);
+  }
+
+  /**
+   * Upload an image/GIF from disk and return its media id for CreateTweet.
+   *
+   * Local patch 2026-11-06 (hero #17, v2.1.0): see mediaApi.uploadMediaFile
+   * — chunked INIT/APPEND/FINALIZE over the signed SimpleHttp path.
+   * Only jpg/png/gif/webp, with X's size limits enforced (5 MB images,
+   * 15 MB GIFs). The upload itself creates no tweet; attach the returned
+   * media id via sendTweet(text, { mediaIds: [id] }).
+   *
+   * @param {string} filePath - Path to the image file
+   * @returns {Promise<{ mediaId: string, mimeType: string, bytes: number, filename: string }>}
+   */
+  async uploadMedia(filePath) {
+    this._requireAuth();
+    return mediaApi.uploadMediaFile(this._http, filePath);
   }
 
   /**
@@ -849,6 +942,28 @@ export class Scraper {
       skip_status: 'true',
     }).toString();
     return this._http.post(url, body, { 'Content-Type': 'application/x-www-form-urlencoded' });
+  }
+
+  // =========================================================================
+  // Notifications
+  // =========================================================================
+
+  /**
+   * Get the authenticated user's notifications (All / Mentions / Verified).
+   *
+   * Local patch 2026-11-06 (hero #16, v2.1.0): see notificationsApi.
+   * getNotifications — the scrapers-layer module for the same operation
+   * runs on the unsigned TwitterHttpClient and was never usable from this
+   * tool; this one uses the signed SimpleHttp path.
+   *
+   * @param {Object} [options={}]
+   * @param {'all'|'mentions'|'verified'} [options.type='all'] Which tab
+   * @param {number} [options.count=20] Maximum events
+   * @returns {Promise<Array>} Notification events, newest first
+   */
+  async getNotifications(options = {}) {
+    this._requireAuth();
+    return notificationsApi.getNotifications(this._http, options);
   }
 
   // =========================================================================

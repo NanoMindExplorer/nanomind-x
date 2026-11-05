@@ -1,6 +1,6 @@
 {
   "name": "nanomind-x-engine",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "nanomind-x engine \u2014 the in-tree X/Twitter toolkit (signed GraphQL client, MCP server, CLI, browser scripts). Forked from the upstream 4.0.1 engine release, see NOTICE for upstream attribution.",
   "homepage": "https://github.com/NanoMindExplorer/nanomind-x",
   "repository": {
