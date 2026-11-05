@@ -4,10 +4,72 @@ Agent-fit X tool: signed GraphQL search, profile and timeline reads, and
 posting with a dry-run default and an idempotency guard. One JSON object per
 call, structured errors, exit codes an agent can branch on.
 
+Version 2.1.0 — 36 commands covering search, reads, posting, engagement and
+account management, all through signed GraphQL/REST paths (no login form,
+no browser needed for reads or posts). See [Features](#features) for the
+full list.
+
 The engine (`engine/`) is an in-tree fork of the upstream 4.0.1 release with
 transaction-ID signing on every GraphQL call (this is what fixed the search
 404 and the CreateTweet 226), a fixed liked-tweets resolution and core-first
 author parsing. Full upstream attribution is in `NOTICE`.
+
+## Features
+
+**Search and read**
+
+- `search <query>` — signed GraphQL search, `--mode latest|top|people`,
+  capped at one call per 60 seconds (`--burst` overrides and logs it)
+- `profile <screen_name>`, `timeline <screen_name>` — profile and tweets
+- `tweet --id <tweet_id>` — one tweet
+- `thread --id <tweet_id>` — the full conversation: focal tweet plus its
+  replies in order (v2.1.0)
+- `liked`, `followers`, `following`, `replies` — liked tweets, followers,
+  following, tweets + replies
+- `trends` — trending topics
+- `notifications [--type all|mentions|verified]` — mentions, replies, likes
+  and follows on your account, newest first (v2.1.0)
+- `blocked` — accounts you blocked; `me` — the signed-in account
+- `dms`, `dm-read --id <conversation_id>` — DM conversations and messages
+
+**Post and engage**
+
+- `post --text "..."`, `reply --id <id> --text "..."`,
+  `quote --id <id> --text "..."` — post, reply, quote
+- `thread --text "part one || part two"` — multi-part threads, max 25
+  parts, each replying to the previous one
+- `--media <image>` on `post`, `reply` and `quote` — attach a photo
+  (jpg/png/gif/webp, 5 MB images / 15 MB GIFs) via chunked upload (v2.1.0)
+- `like` / `unlike`, `repost` / `unrepost`, `bookmark` / `unbookmark`
+- `delete --id <tweet_id>` — delete your own tweet
+
+**Account management**
+
+- `follow` / `unfollow`, `pin` / `unpin` — via signed REST paths
+- `block` / `unblock`, `mute` / `unmute` — see Known limitations below
+- `bio --text "..."` — update the profile bio (max 160 chars)
+- `dm --user <screen_name> --text "..."` — send a DM
+
+**Safety, built in**
+
+- Writes are dry-run by default: nothing is sent without `--confirm`
+- An append-only idempotency ledger refuses a duplicate write for the same
+  operation and text within 24 hours (toggle pairs are stateful: pin →
+  unpin → pin is allowed, a repeated pin is not)
+- One JSON object per call on stdout; exit codes 0 ok, 2 usage,
+  3 rate-limited, 4 auth, 5 upstream
+- Reads never use the browser; writes fall back to it only with
+  `--allow-browser-fallback`
+
+## Known limitations
+
+- `unblock` returns HTTP 404 (error 34) on every route tried, even while the
+  account is verifiably blocked — X no longer serves `blocks/destroy.json`
+  to this session. Treat a block as effectively permanent from this tool;
+  check the current list with `nanomind-x blocked`.
+- No scheduled posts, polls, lists, Spaces, Grok or articles — and no
+  automation of any kind (auto-follow, auto-like, bulk actions). Deliberate:
+  automation is what gets accounts flagged.
 
 ## Install
 
@@ -76,13 +138,52 @@ Cookies equal full session access. Anyone with them can post as you.
 
 All output on stdout is a single JSON object. Human chatter goes to stderr.
 Exit codes: 0 ok, 2 usage, 3 rate-limited, 4 auth, 5 upstream.
+Full usage per command is in `skill/nanomind-x/SKILL.md`.
 
 ```sh
+# Search and read
 nanomind-x search <query> [--mode latest|top|people] [--limit N] [--burst]
 nanomind-x profile <screen_name>
 nanomind-x timeline <screen_name> [--limit N]
-nanomind-x post --text "..." [--confirm] [--allow-browser-fallback] [--force]
+nanomind-x tweet --id <tweet_id>
+nanomind-x thread --id <tweet_id>
+nanomind-x liked <screen_name> [--limit N]
+nanomind-x followers <screen_name> [--limit N]
+nanomind-x following <screen_name> [--limit N]
+nanomind-x replies <screen_name> [--limit N]
+nanomind-x trends
+nanomind-x notifications [--type all|mentions|verified] [--limit N]
+nanomind-x blocked [--limit N]
+nanomind-x me
+nanomind-x dms [--limit N]
+nanomind-x dm-read --id <conversation_id> [--limit N]
+
+# Post and engage (dry-run by default; add --confirm to send)
+nanomind-x post --text "..." [--media <image>] [--confirm]
+nanomind-x reply --id <tweet_id> --text "..." [--media <image>] [--confirm]
+nanomind-x quote --id <tweet_id> --text "..." [--media <image>] [--confirm]
+nanomind-x thread --text "part one || part two" [--confirm]
+nanomind-x like --id <tweet_id> [--confirm]
+nanomind-x unlike --id <tweet_id> [--confirm]
+nanomind-x repost --id <tweet_id> [--confirm]
+nanomind-x unrepost --id <tweet_id> [--confirm]
+nanomind-x bookmark --id <tweet_id> [--confirm]
+nanomind-x unbookmark --id <tweet_id> [--confirm]
 nanomind-x delete --id <tweet_id> [--confirm]
+
+# Account management (dry-run by default; add --confirm to apply)
+nanomind-x follow <screen_name> [--confirm]
+nanomind-x unfollow <screen_name> [--confirm]
+nanomind-x pin --id <tweet_id> [--confirm]
+nanomind-x unpin --id <tweet_id> [--confirm]
+nanomind-x block <screen_name> [--confirm]
+nanomind-x unblock <screen_name> [--confirm]
+nanomind-x mute <screen_name> [--confirm]
+nanomind-x unmute <screen_name> [--confirm]
+nanomind-x bio --text "..." [--confirm]
+nanomind-x dm --user <screen_name> --text "..." [--confirm]
+
+# Session check
 nanomind-x health
 ```
 
@@ -134,7 +235,7 @@ the localhost proxy forwarder (see Troubleshooting).
 
 - `nanomind-x.mjs` — the agent wrapper (JSON output, dry-run, ledger, caps)
 - `engine/` — the forked engine (GraphQL client, MCP server, CLI)
-- `patches/` — change record of the nine local modifications, already
+- `patches/` — change record of the twenty-one local modifications, already
   applied in-tree
 - `scripts/refresh-query-ids.mjs` — authenticated query-ID cache refresh
 - `proxy_forward.js` — localhost CONNECT forwarder for the browser path
