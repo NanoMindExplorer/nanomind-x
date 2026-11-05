@@ -1,0 +1,316 @@
+// Copyright (c) 2024-2026 nich (@nichxbt). Licensed under the Apache License, Version 2.0.
+/**
+ * ============================================================
+ * 🧵 Thread Composer & Publisher — Production Grade
+ * ============================================================
+ *
+ * @name        threadComposer.js
+ * @description Compose and publish Twitter/X threads from the
+ *              browser console. Manages multi-tweet threads with
+ *              character counting, auto-numbering, preview mode,
+ *              draft persistence (localStorage), and sequential
+ *              posting with human-like delays.
+ * @author      nichxbt (https://x.com/nichxbt)
+ * @version     1.0.0
+ * @date        2026-02-24
+ * @repository  https://github.com/NanoMindExplorer/nanomind-x
+ *
+ * ============================================================
+ * 📋 USAGE:
+ *
+ * 1. Open x.com in browser
+ * 2. Paste in DevTools Console
+ * 3. Use window.NanomindX commands:
+ *
+ *   nanomind-x.thread([
+ *     "First tweet of my thread 🧵",
+ *     "Second tweet with more context...",
+ *     "Third tweet — the conclusion!",
+ *   ])
+ *
+ *   nanomind-x.preview()        // See the thread with char counts
+ *   nanomind-x.publish()        // Post the thread (dryRun by default)
+ *   nanomind-x.saveDraft('name') // Save to localStorage
+ *   nanomind-x.loadDraft('name') // Load from localStorage
+ *   nanomind-x.listDrafts()      // See all saved drafts
+ *   nanomind-x.deleteDraft('name')
+ * ============================================================
+ */
+(() => {
+  'use strict';
+
+  const CONFIG = {
+    dryRun: true,             // Set false to actually post
+    autoNumber: false,         // Add "1/N" numbering
+    addThreadEmoji: true,      // Add 🧵 to first tweet if missing
+    delayBetween: [3000, 6000], // Delay between posting each tweet
+    maxChars: 280,
+  };
+
+  const STORAGE_PREFIX = 'nanomindx_thread_draft_';
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const gaussian = (a, b) => Math.floor(a + ((Math.random() + Math.random()) / 2) * (b - a));
+
+  const SEL = {
+    tweetBox: '[data-testid="tweetTextarea_0"]',
+    tweetButton: '[data-testid="tweetButton"]',
+    addTweet: '[data-testid="addButton"]',     // The "+" button to add another tweet in thread
+    closeCompose: '[data-testid="app-bar-close"]',
+  };
+
+  const $ = (sel, ctx = document) => ctx.querySelector(sel);
+
+  let currentThread = [];
+  let aborted = false;
+
+  // ── Thread management ──────────────────────────────────────
+  window.NanomindX = window.NanomindX || {};
+
+  window.NanomindX.thread = (tweets) => {
+    if (!Array.isArray(tweets) || tweets.length === 0) {
+      console.log('❌ Usage: nanomind-x.thread(["tweet1", "tweet2", ...])');
+      return;
+    }
+
+    currentThread = tweets.map((t, i) => {
+      let text = t.trim();
+
+      // Auto-numbering
+      if (CONFIG.autoNumber) {
+        const num = `${i + 1}/${tweets.length}`;
+        if (!text.startsWith(num)) {
+          text = `${num}\n\n${text}`;
+        }
+      }
+
+      // Thread emoji on first tweet
+      if (i === 0 && CONFIG.addThreadEmoji && !text.includes('🧵')) {
+        text = text + ' 🧵';
+      }
+
+      return text;
+    });
+
+    console.log(`✅ Thread loaded: ${currentThread.length} tweets.`);
+    window.NanomindX.preview();
+  };
+
+  window.NanomindX.preview = () => {
+    if (currentThread.length === 0) {
+      console.log('📭 No thread loaded. Use nanomind-x.thread([...])');
+      return;
+    }
+
+    const W = 58;
+    console.log('\n╔' + '═'.repeat(W) + '╗');
+    console.log('║  🧵 THREAD PREVIEW' + ' '.repeat(W - 20) + '║');
+    console.log('╚' + '═'.repeat(W) + '╝');
+
+    for (let i = 0; i < currentThread.length; i++) {
+      const text = currentThread[i];
+      const charCount = text.length;
+      const status = charCount > CONFIG.maxChars ? '🔴 OVER' : charCount > CONFIG.maxChars - 20 ? '🟡 CLOSE' : '🟢 OK';
+
+      console.log(`\n┌─ Tweet ${i + 1}/${currentThread.length} ─ ${charCount}/${CONFIG.maxChars} chars [${status}] ${'─'.repeat(Math.max(0, 30 - String(charCount).length))}`);
+
+      // Word wrap display
+      const lines = text.split('\n');
+      for (const line of lines) {
+        console.log(`│ ${line}`);
+      }
+      console.log('└' + '─'.repeat(W));
+    }
+
+    const overLimit = currentThread.filter(t => t.length > CONFIG.maxChars);
+    if (overLimit.length > 0) {
+      console.log(`\n⚠️ ${overLimit.length} tweet(s) exceed ${CONFIG.maxChars} characters!`);
+    }
+
+    const totalChars = currentThread.reduce((s, t) => s + t.length, 0);
+    console.log(`\n📊 ${currentThread.length} tweets | ${totalChars} total chars | ~${Math.ceil(totalChars / 200)} min read`);
+  };
+
+  window.NanomindX.publish = async () => {
+    if (currentThread.length === 0) {
+      console.log('❌ No thread loaded. Use nanomind-x.thread([...]) first.');
+      return;
+    }
+
+    const overLimit = currentThread.filter(t => t.length > CONFIG.maxChars);
+    if (overLimit.length > 0) {
+      console.log(`❌ ${overLimit.length} tweet(s) exceed character limit. Fix them first.`);
+      return;
+    }
+
+    if (CONFIG.dryRun) {
+      console.log('\n🏃 DRY RUN — simulating thread publish...\n');
+      for (let i = 0; i < currentThread.length; i++) {
+        console.log(`  [${i + 1}/${currentThread.length}] Would post: "${currentThread[i].slice(0, 60)}..."`);
+        await sleep(500);
+      }
+      console.log('\n✅ Dry run complete. Set CONFIG.dryRun = false to actually post.');
+      return;
+    }
+
+    aborted = false;
+    console.log(`\n🚀 Publishing thread (${currentThread.length} tweets)...\n`);
+
+    // Open compose
+    const composeBtn = document.querySelector('[data-testid="SideNav_NewTweet_Button"]') ||
+                       document.querySelector('a[href="/compose/tweet"]');
+    if (composeBtn) {
+      composeBtn.click();
+      await sleep(2000);
+    }
+
+    for (let i = 0; i < currentThread.length; i++) {
+      if (aborted) {
+        console.log('🛑 Aborted by user.');
+        break;
+      }
+
+      const text = currentThread[i];
+      console.log(`  [${i + 1}/${currentThread.length}] Posting: "${text.slice(0, 50)}..."`);
+
+      // Find the tweet box (for thread, the latest/last one)
+      const tweetBoxes = document.querySelectorAll('[data-testid="tweetTextarea_0"]');
+      const tweetBox = tweetBoxes[tweetBoxes.length - 1];
+      if (!tweetBox) {
+        console.error(`  ❌ Tweet box not found at tweet ${i + 1}. Aborting.`);
+        break;
+      }
+
+      // Type the text
+      tweetBox.focus();
+      await sleep(300);
+      document.execCommand('insertText', false, text);
+      await sleep(800);
+
+      if (i < currentThread.length - 1) {
+        // Add another tweet to thread (click "+" button)
+        const addBtn = $(SEL.addTweet);
+        if (addBtn) {
+          addBtn.click();
+          await sleep(1500);
+        } else {
+          console.error('  ❌ "Add tweet" button not found. Cannot continue thread.');
+          break;
+        }
+      }
+    }
+
+    if (!aborted) {
+      // Post the thread
+      console.log('\n  📤 Sending thread...');
+      const tweetBtn = $(SEL.tweetButton);
+      if (!tweetBtn) {
+        // Try alternate: "Post all" button
+        const postAll = document.querySelector('[data-testid="tweetButtonInline"]') ||
+                        document.querySelector('div[data-testid="tweetButton"]');
+        if (postAll) postAll.click();
+        else console.error('  ❌ Post button not found.');
+      } else {
+        tweetBtn.click();
+      }
+
+      await sleep(3000);
+      console.log('✅ Thread published successfully! 🧵');
+    }
+  };
+
+  window.NanomindX.abort = () => { aborted = true; console.log('🛑 Aborting...'); };
+
+  // ── Draft Management ───────────────────────────────────────
+  window.NanomindX.saveDraft = (name) => {
+    if (!name) { console.log('❌ Usage: nanomind-x.saveDraft("myThread")'); return; }
+    if (currentThread.length === 0) { console.log('❌ No thread loaded.'); return; }
+
+    const draft = {
+      tweets: currentThread,
+      savedAt: new Date().toISOString(),
+      name,
+    };
+    localStorage.setItem(STORAGE_PREFIX + name, JSON.stringify(draft));
+    console.log(`💾 Draft "${name}" saved (${currentThread.length} tweets).`);
+  };
+
+  window.NanomindX.loadDraft = (name) => {
+    if (!name) { console.log('❌ Usage: nanomind-x.loadDraft("myThread")'); return; }
+
+    const raw = localStorage.getItem(STORAGE_PREFIX + name);
+    if (!raw) { console.log(`❌ Draft "${name}" not found.`); return; }
+
+    try {
+      const draft = JSON.parse(raw);
+      currentThread = draft.tweets;
+      console.log(`📂 Loaded draft "${name}" (${currentThread.length} tweets, saved ${draft.savedAt}).`);
+      window.NanomindX.preview();
+    } catch {
+      console.log('❌ Failed to parse draft.');
+    }
+  };
+
+  window.NanomindX.listDrafts = () => {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key.startsWith(STORAGE_PREFIX)) {
+        const name = key.slice(STORAGE_PREFIX.length);
+        try {
+          const draft = JSON.parse(localStorage.getItem(key));
+          keys.push({ name, tweets: draft.tweets.length, savedAt: draft.savedAt });
+        } catch { /* skip corrupt */ }
+      }
+    }
+
+    if (keys.length === 0) {
+      console.log('📭 No saved drafts.');
+      return;
+    }
+
+    console.log(`\n📋 SAVED DRAFTS (${keys.length}):\n`);
+    for (const d of keys) {
+      console.log(`  📝 "${d.name}" — ${d.tweets} tweets (saved ${d.savedAt})`);
+    }
+  };
+
+  window.NanomindX.deleteDraft = (name) => {
+    if (!name) { console.log('❌ Usage: nanomind-x.deleteDraft("myThread")'); return; }
+    if (!localStorage.getItem(STORAGE_PREFIX + name)) {
+      console.log(`❌ Draft "${name}" not found.`);
+      return;
+    }
+    localStorage.removeItem(STORAGE_PREFIX + name);
+    console.log(`🗑️ Draft "${name}" deleted.`);
+  };
+
+  window.NanomindX.exportThread = () => {
+    if (currentThread.length === 0) {
+      console.log('❌ No thread loaded.');
+      return;
+    }
+    const blob = new Blob([JSON.stringify({ tweets: currentThread, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `nanomind-x-thread-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    console.log('📥 Thread exported.');
+  };
+
+  // ── Initialization ─────────────────────────────────────────
+  const W = 60;
+  console.log('╔' + '═'.repeat(W) + '╗');
+  console.log('║  🧵 THREAD COMPOSER & PUBLISHER' + ' '.repeat(W - 33) + '║');
+  console.log('║  by nichxbt — v1.0' + ' '.repeat(W - 21) + '║');
+  console.log('╚' + '═'.repeat(W) + '╝');
+  console.log('\n📋 Commands:');
+  console.log('  nanomind-x.thread(["tweet1", "tweet2", ...])');
+  console.log('  nanomind-x.preview()');
+  console.log('  nanomind-x.publish()');
+  console.log('  nanomind-x.saveDraft("name")');
+  console.log('  nanomind-x.loadDraft("name")');
+  console.log('  nanomind-x.listDrafts()');
+  console.log('  nanomind-x.deleteDraft("name")');
+  console.log('  nanomind-x.exportThread()');
+  console.log('\n💡 Tip: Start with nanomind-x.thread([...]) then nanomind-x.preview()');
+
+})();

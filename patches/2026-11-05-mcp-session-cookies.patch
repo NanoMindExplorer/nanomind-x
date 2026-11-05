@@ -1,0 +1,63 @@
+--- a/src/mcp/local-tools.js
++++ b/src/mcp/local-tools.js
+@@ -57,10 +57,42 @@
+     }
+     browser = await createBrowser();
+     page = await createPage(browser);
++    // Local patch 2026-11-05 (hero): the browser starts logged out, so UI
++    // actions (post/like/follow) always failed. Load the saved session
++    // cookies from ~/.nanomind-x/cookies.json so the page runs as the user.
++    await loadSessionCookiesIntoPage(page);
+   }
+   return { browser, page };
+ }
+ 
++// Local patch 2026-11-05 (hero): read the CLI session file (Cookie-Editor
++// JSON) and set its cookies on the page. No credentials are logged or stored
++// anywhere new; the file is only read.
++async function loadSessionCookiesIntoPage(pg) {
++  try {
++    const cookiePath = path.join(os.homedir(), '.nanomind-x', 'cookies.json');
++    const cookies = JSON.parse(await fs.readFile(cookiePath, 'utf8'));
++    const sameSiteMap = { no_restriction: 'None', lax: 'Lax', strict: 'Strict' };
++    const mapped = cookies
++      .filter((c) => c.name && typeof c.value === 'string')
++      .map((c) => ({
++        name: c.name,
++        value: c.value,
++        domain: c.domain || '.x.com',
++        path: c.path || '/',
++        expires: c.expirationDate || undefined,
++        httpOnly: !!c.httpOnly,
++        secure: !!c.secure,
++        sameSite: sameSiteMap[c.sameSite] || undefined,
++      }));
++    // A page can only receive cookies for a domain it has visited.
++    await pg.goto('https://x.com/', { waitUntil: 'domcontentloaded' });
++    await pg.setCookie(...mapped);
++  } catch {
++    // No saved session — browser actions will run logged out and fail cleanly.
++  }
++}
++
+ // ============================================================================
+ // HTTP client (no browser) — preferred for public reads
+ // ============================================================================
+@@ -477,10 +509,13 @@
+ 
+ export async function x_post_tweet({ text }) {
+   const { page: pg } = await ensureBrowser();
+-  await pg.goto('https://x.com/compose/tweet', { waitUntil: 'networkidle2' });
+-  await randomDelay();
+-
+-  const textbox = await pg.$('[data-testid="tweetTextarea_0"]');
++  // Local patch 2026-11-05 (hero): networkidle2 never settles on the
++  // logged-in compose page (persistent connections), so the old goto always
++  // timed out. Load to DOMContentLoaded and wait for the textbox instead.
++  await pg.goto('https://x.com/compose/tweet', { waitUntil: 'domcontentloaded' });
++  const textbox = await pg
++    .waitForSelector('[data-testid="tweetTextarea_0"]', { timeout: 30000 })
++    .catch(() => null);
+   if (textbox) {
+     await textbox.type(text, { delay: 50 });
+     await sleep(500);

@@ -1,0 +1,5 @@
+name: "nanomind-x"
+title: "nanomind-x — agent-fit X tool"
+description: "Search X, read profiles and timelines, and post or delete with a dry-run default and idempotency guard, using the nanomind-x CLI."
+category: "Work and knowledge"
+include_in_prompt: true

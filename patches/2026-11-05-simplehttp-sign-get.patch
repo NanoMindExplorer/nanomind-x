@@ -1,0 +1,46 @@
+--- a/src/client/Scraper.js
++++ b/src/client/Scraper.js
+@@ -95,6 +95,25 @@
+  * In Track 03 this will be replaced by the full HttpClient.
+  * @private
+  */
++
++// Local patch 2026-11-05 (hero): sign GETs with x-client-transaction-id.
++// Root cause of the SearchTimeline/Followers HTTP 404 (empty body): SimpleHttp
++// never sent the header x.com's web client attaches to every GraphQL call.
++// A/B-verified 2026-11-05: identical SearchTimeline request unsigned -> 404
++// empty body; signed -> 200 with 22 timeline entries. UserByScreenName /
++// UserTweets tolerated unsigned requests, which is why only search/followers
++// looked broken. Signing is best-effort (a null result sends the request
++// unsigned, exactly as before). Dynamic import avoids a static import cycle
++// with the scrapers layer. GET ONLY: post() is intentionally left unsigned
++// until Iman approves the write-path change (see xagent_fit_report.md).
++let _txidModulePromise = null;
++function _getTransactionIdModule() {
++  if (!_txidModulePromise) {
++    _txidModulePromise = import('../scrapers/twitter/http/transactionId.js').catch(() => null);
++  }
++  return _txidModulePromise;
++}
++
+ class SimpleHttp {
+   constructor(tokenManager, options = {}) {
+     this._tokenManager = tokenManager;
+@@ -120,6 +139,17 @@
+     let req = { method: 'GET', headers };
+     if (this._transform) req = this._transform(req) || req;
+ 
++    // Local patch 2026-11-05 (hero): attach x-client-transaction-id (see note
++    // above the SimpleHttp class). Best-effort; a failure leaves the request
++    // unsigned, as before.
++    try {
++      const mod = await _getTransactionIdModule();
++      const txid = mod ? await mod.getTransactionId('GET', url) : null;
++      if (txid) req.headers['x-client-transaction-id'] = txid;
++    } catch {
++      // Signing failed; send unsigned, as before the patch.
++    }
++
+     const res = await this._fetchFn(url, req);
+     if (!res.ok) {
+       throw describeHttpFailure(res, url, this._authenticated);

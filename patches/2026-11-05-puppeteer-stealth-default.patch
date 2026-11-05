@@ -1,0 +1,18 @@
+--- a/src/utils/puppeteerStealth.js
++++ b/src/utils/puppeteerStealth.js
+@@ -40,11 +40,14 @@
+ 
+   const feature = options.feature || 'Browser automation';
+   pending = (async () => {
+-    const puppeteer = await importOptional('puppeteer-extra', {
++    const loaded = await importOptional('puppeteer-extra', {
+       feature,
+       install: INSTALL,
+       alternative: ALTERNATIVE,
+     });
++    // Local fix 2026-11-05 (hero): importOptional returns the ESM namespace
++    // for puppeteer-extra (it has named keys), so .use lives on .default.
++    const puppeteer = typeof loaded.use === 'function' ? loaded : loaded.default;
+     const StealthPlugin = await importOptional('puppeteer-extra-plugin-stealth', {
+       feature,
+       install: INSTALL,

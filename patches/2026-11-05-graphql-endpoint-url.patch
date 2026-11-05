@@ -1,0 +1,13 @@
+--- a/src/client/api/graphqlQueries.js
++++ b/src/client/api/graphqlQueries.js
+@@ -58,6 +58,10 @@
+       return queryId(name, fallback);
+     },
+     operationName: name,
++    // Local fix 2026-11-05 (hero): call sites (tweets.js, users.js) invoke
++    // endpoint.url(...), but this factory never defined one — every
++    // sendTweet/getTweets call threw "endpoint.url is not a function".
++    url: (qid) => `https://x.com/i/api/graphql/${qid ?? queryId(name, fallback)}/${name}`,
+     ...rest,
+   };
+ }

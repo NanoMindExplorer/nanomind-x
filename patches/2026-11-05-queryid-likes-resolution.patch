@@ -1,0 +1,28 @@
+--- a/src/scrapers/twitter/http/queryIds.js
++++ b/src/scrapers/twitter/http/queryIds.js
+@@ -473,7 +473,25 @@
+  * @param {string} name
+  * @returns {string}
+  */
++// Local patch 2026-11-05 (hero): a name that IS itself an x.com operation
++// name must resolve to itself. The key table maps the key 'Likes' to the
++// *Favoriters* operation (who liked one tweet), while 'Likes' is also the
++// operation name of the user's liked-tweets timeline (key 'UserLikes').
++// Resolving 'Likes' through the key table returned the Favoriters query ID,
++// so requests went to /graphql/<Favoriters-id>/Likes and X answered
++// GRAPHQL_VALIDATION_FAILED / HTTP 422. Only 'Likes' is affected: it is the
++// sole key whose string is also another operation's name. (Built lazily like
++// hardcoded() below: endpoints.js imports this module too, so GRAPHQL may
++// be uninitialised at module load.)
++let _operationNames = null;
++function operationNames() {
++  if (!_operationNames) {
++    _operationNames = new Set(Object.values(GRAPHQL).map((e) => e.operationName));
++  }
++  return _operationNames;
++}
+ export function toOperationName(name) {
++  if (operationNames().has(name)) return name;
+   if (GRAPHQL[name]) return GRAPHQL[name].operationName;
+   return name;
+ }

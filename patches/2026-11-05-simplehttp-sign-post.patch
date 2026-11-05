@@ -1,0 +1,40 @@
+--- a/src/client/Scraper.js
++++ b/src/client/Scraper.js
+@@ -96,7 +96,7 @@
+  * @private
+  */
+ 
+-// Local patch 2026-11-05 (hero): sign GETs with x-client-transaction-id.
++// Local patch 2026-11-05 (hero): sign GETs and POSTs with x-client-transaction-id.
+ // Root cause of the SearchTimeline/Followers HTTP 404 (empty body): SimpleHttp
+ // never sent the header x.com's web client attaches to every GraphQL call.
+ // A/B-verified 2026-11-05: identical SearchTimeline request unsigned -> 404
+@@ -104,8 +104,8 @@
+ // UserTweets tolerated unsigned requests, which is why only search/followers
+ // looked broken. Signing is best-effort (a null result sends the request
+ // unsigned, exactly as before). Dynamic import avoids a static import cycle
+-// with the scrapers layer. GET ONLY: post() is intentionally left unsigned
+-// until Iman approves the write-path change (see xagent_fit_report.md).
++// with the scrapers layer. GET signing added first; POST signing added under
++// P2 after Iman's approval 2026-11-05 ~17:49 WIB (see xagent_fit_report.md).
+ let _txidModulePromise = null;
+ function _getTransactionIdModule() {
+   if (!_txidModulePromise) {
+@@ -182,6 +182,17 @@
+     let req = { method: 'POST', headers, body: payload };
+     if (this._transform) req = this._transform(req) || req;
+ 
++    // Local patch 2026-11-05 (hero): attach x-client-transaction-id to POSTs
++    // too (P2, Iman approved 2026-11-05 ~17:49 WIB). Same best-effort pattern
++    // as the GET patch above; a failure leaves the request unsigned.
++    try {
++      const mod = await _getTransactionIdModule();
++      const txid = mod ? await mod.getTransactionId('POST', url) : null;
++      if (txid) req.headers['x-client-transaction-id'] = txid;
++    } catch {
++      // Signing failed; send unsigned, as before the patch.
++    }
++
+     const res = await this._fetchFn(url, req);
+     if (!res.ok) {
+       throw describeHttpFailure(res, url, this._authenticated);

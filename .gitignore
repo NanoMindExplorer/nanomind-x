@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.nanomind-x/
+xagent_fit_report.md
+proxy_forward.log
+.DS_Store

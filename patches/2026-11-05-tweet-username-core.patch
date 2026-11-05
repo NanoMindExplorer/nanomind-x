@@ -1,0 +1,15 @@
+--- a/src/client/models/Tweet.js
++++ b/src/client/models/Tweet.js
+@@ -192,7 +192,11 @@
+     // User info from core.user_results
+     const userResult = raw.core?.user_results?.result;
+     if (userResult) {
+-      tweet.username = userResult.legacy?.screen_name || '';
++      // Local patch 2026-11-05 (hero): the user result no longer carries a
++      // `legacy` block at all (2026 shape: core.screen_name + rest_id).
++      // Reading legacy.screen_name alone left username "" on every search /
++      // timeline / likes result. Same core-first fallback Profile uses.
++      tweet.username = userResult.core?.screen_name || userResult.legacy?.screen_name || '';
+       tweet.userId = userResult.rest_id || userResult.legacy?.id_str || '';
+     }
+ 

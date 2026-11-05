@@ -1,0 +1,25 @@
+--- a/src/client/api/tweets.js
++++ b/src/client/api/tweets.js
+@@ -208,6 +208,14 @@
+ 
+   while (yielded < count) {
+     const endpoint = GRAPHQL_ENDPOINTS.Likes;
++    // Local patch 2026-11-05 (hero): variables mirror the live web client
++    // fetchLikes call site (main bundle): userId, count, cursor,
++    // includePromotedContent:false, withClientEventToken:false,
++    // withBirdwatchNotes:false, withVoice:true. withV2Timeline is the ONLY
++    // field dropped — it no longer exists in the live bundle. (The HTTP 422
++    // seen before this patch was NOT the variables: the request carried the
++    // Favoriters query ID on a Likes path — see the toOperationName fix in
++    // queryIds.js. Variables are kept at the live shape regardless.)
+     const variables = {
+       userId,
+       count: 20,
+@@ -215,7 +223,6 @@
+       withClientEventToken: false,
+       withBirdwatchNotes: false,
+       withVoice: true,
+-      withV2Timeline: true,
+     };
+     if (cursor) variables.cursor = cursor;
+ 

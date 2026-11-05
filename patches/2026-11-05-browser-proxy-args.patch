@@ -1,0 +1,18 @@
+--- a/src/scrapers/twitter/index.js
++++ b/src/scrapers/twitter/index.js
+@@ -55,6 +55,15 @@
+       '--disable-setuid-sandbox',
+       '--disable-blink-features=AutomationControlled',
+       '--disable-web-security',
++      // Local patch 2026-11-05 (hero): route Chromium through the localhost
++      // CONNECT forwarder (proxy_forward.js), which adds preemptive
++      // Proxy-Authorization for the egress proxy. Without this, Chromium's
++      // CONNECT fails (proxy drops unauthenticated tunnels).
++      '--proxy-server=http://127.0.0.1:18080',
++      // Local patch 2026-11-05 (hero): the egress proxy terminates TLS
++      // (MITM) with its own CA, which curl/Node trust via the system bundle
++      // but Chromium does not. This browser only visits x.com.
++      '--ignore-certificate-errors',
+     ],
+     ...options,
+   });

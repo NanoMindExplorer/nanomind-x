@@ -1,0 +1,11 @@
+nanomind-x
+Copyright (c) 2026 NanoMindExplorer
+
+This product includes software developed by the XActions project
+(https://github.com/nirholas/XActions), Copyright (c) 2024-2026 nich
+(@nichxbt), licensed under the Apache License, Version 2.0. The engine in
+engine/ is a fork of XActions 4.0.1 with local modifications (transaction-ID
+signing on GraphQL GET and POST, liked-tweets query resolution, core-first
+author parsing, browser proxy support, session-cookie injection for the MCP
+browser path). The original XActions LICENSE is preserved in engine/LICENSE
+and in LICENSE at the repository root.

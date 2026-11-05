@@ -1,0 +1,377 @@
+{
+  "name": "nanomind-x-engine",
+  "version": "1.0.0",
+  "description": "nanomind-x engine \u2014 the in-tree X/Twitter toolkit (signed GraphQL client, MCP server, CLI, browser scripts). Forked from the upstream 4.0.1 engine release, see NOTICE for upstream attribution.",
+  "homepage": "https://github.com/NanoMindExplorer/nanomind-x",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NanoMindExplorer/nanomind-x.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NanoMindExplorer/nanomind-x/issues"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./scrapers": {
+      "types": "./types/generated/src/scrapers/index.d.ts",
+      "default": "./src/scrapers/index.js"
+    },
+    "./scrapers/twitter": {
+      "types": "./types/generated/src/scrapers/twitter/index.d.ts",
+      "default": "./src/scrapers/twitter/index.js"
+    },
+    "./scrapers/twitter/http": {
+      "types": "./types/generated/src/scrapers/twitter/http/index.d.ts",
+      "default": "./src/scrapers/twitter/http/index.js"
+    },
+    "./scrapers/bluesky": {
+      "types": "./types/generated/src/scrapers/bluesky/index.d.ts",
+      "default": "./src/scrapers/bluesky/index.js"
+    },
+    "./scrapers/mastodon": {
+      "types": "./types/generated/src/scrapers/mastodon/index.d.ts",
+      "default": "./src/scrapers/mastodon/index.js"
+    },
+    "./scrapers/threads": {
+      "types": "./types/generated/src/scrapers/threads/index.d.ts",
+      "default": "./src/scrapers/threads/index.js"
+    },
+    "./streaming": {
+      "types": "./types/generated/src/streaming/index.d.ts",
+      "default": "./src/streaming/index.js"
+    },
+    "./analytics": {
+      "types": "./types/generated/src/analytics/index.d.ts",
+      "default": "./src/analytics/index.js"
+    },
+    "./plugins": {
+      "types": "./types/generated/src/plugins/index.d.ts",
+      "default": "./src/plugins/index.js"
+    },
+    "./mcp": {
+      "types": "./types/generated/src/mcp/server.d.ts",
+      "default": "./src/mcp/server.js"
+    },
+    "./cli": {
+      "types": "./types/generated/src/cli/index.d.ts",
+      "default": "./src/cli/index.js"
+    },
+    "./client": {
+      "types": "./types/generated/src/client/index.d.ts",
+      "default": "./src/client/index.js"
+    },
+    "./spaces": {
+      "types": "./types/generated/src/spaces/agent.d.ts",
+      "default": "./src/spaces/agent.js"
+    },
+    "./portability": {
+      "types": "./types/generated/src/portability/index.d.ts",
+      "default": "./src/portability/index.js"
+    },
+    "./media": {
+      "types": "./types/generated/src/media/index.d.ts",
+      "default": "./src/media/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "nanomind-x-engine": "./src/cli/index.js",
+    "nanomind-x-mcp": "./src/mcp/server.js",
+    "nanomind-x-agent": "./src/agents/thoughtLeaderAgent.js"
+  },
+  "scripts": {
+    "vercel-build": "prisma generate",
+    "dev": "NODE_ENV=development nodemon api/server.js",
+    "start": "NODE_ENV=production node api/server.js",
+    "cli": "node src/cli/index.js",
+    "mcp": "node src/mcp/server.js",
+    "worker": "node api/services/jobQueue.js",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "node prisma/seed.js",
+    "db:studio": "prisma studio",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:x402": "vitest run tests/x402.test.js",
+    "test:x402:integration": "vitest run tests/x402-integration.test.js",
+    "test:x402:all": "vitest run tests/x402*.test.js",
+    "verify:x402": "node scripts/verify-x402.js",
+    "test:payment": "node scripts/test-x402-payment.js",
+    "audit": "node scripts/audit-console-errors.js",
+    "audit:verbose": "node scripts/audit-console-errors.js --verbose",
+    "docs:audit": "node scripts/audit-docs.mjs",
+    "docs:scripts": "node scripts/build-browser-scripts-doc.mjs",
+    "docs:check": "node scripts/build-browser-scripts-doc.mjs --check && node scripts/sync-registry.mjs --check && node scripts/build-ask-index.mjs --check && node scripts/audit-docs.mjs && node scripts/check-x402-routes.mjs && node scripts/build-types.mjs --check",
+    "check:licenses": "node scripts/normalize-license-headers.mjs && node scripts/add-license-notices.mjs",
+    "ask:index": "node scripts/build-ask-index.mjs",
+    "ask:index:check": "node scripts/build-ask-index.mjs --check",
+    "check:endpoints": "node scripts/check-endpoints.mjs",
+    "sync:endpoints": "node scripts/sync-x-endpoints.mjs",
+    "sync:endpoints:check": "node scripts/sync-x-endpoints.mjs --check",
+    "sync:user-agents": "node scripts/sync-user-agents.mjs",
+    "sync:user-agents:check": "node scripts/sync-user-agents.mjs --check",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:railway": "bash scripts/deploy.sh railway",
+    "build:cloudflare": "node scripts/build-cloudflare.mjs",
+    "deploy:cloudflare": "bash scripts/deploy.sh cloudflare",
+    "deploy:pages": "bash deploy/cloudflare/build.sh && wrangler pages deploy pages-out --project-name nanomind-x --branch main --commit-dirty=true",
+    "deploy:fly": "bash scripts/deploy.sh fly",
+    "deploy:docker": "bash scripts/deploy.sh docker",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f api",
+    "agent": "node src/agents/thoughtLeaderAgent.js",
+    "agent:login": "node src/agents/thoughtLeaderAgent.js --login",
+    "agent:test": "node src/agents/thoughtLeaderAgent.js --test",
+    "agent:setup": "node src/agents/setup.js",
+    "video:preview": "cd site/video && npx remotion preview src/index.js",
+    "video:render": "node site/video/render.mjs",
+    "video:render:tweet": "node site/video/render.mjs TweetVideo",
+    "video:render:thread": "node site/video/render.mjs ThreadVideo",
+    "video:render:analytics": "node site/video/render.mjs AnalyticsDashboard",
+    "video:render:promo": "node site/video/render.mjs PromoVideo",
+    "site:docs": "node scripts/build-all-docs.js && node scripts/fix-doc-links.js",
+    "site:index": "node scripts/build-index-pages.mjs",
+    "site:scripts": "node scripts/build-script-pages.js",
+    "site:sitemap": "node scripts/build-sitemap.js",
+    "site:build": "npm run site:docs && npm run site:index && npm run site:scripts && npm run site:sitemap && bash deploy/cloudflare/build.sh",
+    "site:deploy": "npm run site:build && npx wrangler pages deploy pages-out --project-name nanomind-x",
+    "lint": "eslint .",
+    "registry:sync": "node scripts/sync-registry.mjs",
+    "check:x402": "node scripts/check-x402-routes.mjs",
+    "types:build": "node scripts/build-types.mjs",
+    "types:check": "node scripts/build-types.mjs --check"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "inquirer": "^9.2.0",
+    "node-cron": "^4.6.0",
+    "ora": "^8.0.0",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@atproto/api": "^0.13.35",
+    "@eslint/js": "^10.0.1",
+    "@prisma/client": "^5.7.1",
+    "@remotion/bundler": "^4.0.428",
+    "@remotion/cli": "^4.0.428",
+    "@remotion/player": "^4.0.428",
+    "@remotion/renderer": "^4.0.428",
+    "@vitest/coverage-v8": "^4.1.11",
+    "@x402/core": "^2.8.0",
+    "@x402/evm": "^2.8.0",
+    "@x402/express": "^2.8.0",
+    "archiver": "^5.3.2",
+    "axios": "^1.15.2",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "bull": "^4.12.0",
+    "cheerio": "^1.0.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "crawlee": "^3.0.0",
+    "dotenv": "^16.3.1",
+    "eslint": "^10.9.1",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.1",
+    "express-validator": "^7.0.1",
+    "globals": "^17.11.0",
+    "googleapis": "^140.0.0",
+    "got-scraping": "^4.0.0",
+    "helmet": "^7.1.0",
+    "ioredis": "^5.4.1",
+    "jsdom": "^28.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "marked": "^17.0.3",
+    "morgan": "^1.10.1",
+    "nodemailer": "^9.0.3",
+    "nodemon": "^3.0.2",
+    "playwright": "^1.40.0",
+    "prisma": "^5.7.1",
+    "puppeteer": "^24.34.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "remotion": "^4.0.428",
+    "selenium-webdriver": "^4.0.0",
+    "socket.io": "^4.7.5",
+    "stripe": "^14.10.0",
+    "supertest": "^6.3.4",
+    "typescript": "^5.9.3",
+    "viem": "^2.0.0",
+    "vitest": "^4.0.18"
+  },
+  "author": {
+    "name": "nich",
+    "url": "https://github.com/nirholas",
+    "twitter": "@nichxbt"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "nanomind-x",
+    "twitter",
+    "x",
+    "twitter-automation",
+    "twitter-bot",
+    "twitter-scraper",
+    "twitter-unfollow",
+    "twitter-growth",
+    "mass-unfollow",
+    "unfollow-tool",
+    "twitter-tools",
+    "social-media-automation",
+    "twitter-api-alternative",
+    "puppeteer",
+    "twitter-manager",
+    "follower-management",
+    "twitter-cleanup",
+    "auto-follow",
+    "auto-like",
+    "twitter-analytics",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "claude",
+    "gpt",
+    "chatgpt",
+    "saas",
+    "hypefury-alternative",
+    "tweethunter-alternative",
+    "free-twitter-api",
+    "twitter-without-api",
+    "bulk-unfollow",
+    "who-unfollowed-me",
+    "twitter-followers-tracker",
+    "download-twitter-video",
+    "twitter-thread-saver",
+    "twitter-bookmark-export",
+    "vibe-coding",
+    "no-code-twitter",
+    "thought-leader",
+    "algorithm-training",
+    "x-algorithm"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "src",
+    "types",
+    "api/config/x402-config.js",
+    "skills",
+    ".claude-plugin",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "mcpName": "io.github.nirholas/nanomind-x",
+  "overrides": {
+    "uuid": "^11.1.1"
+  },
+  "peerDependencies": {
+    "@atproto/api": "^0.13.35",
+    "@prisma/client": ">=5.0.0",
+    "@x402/core": "^2.8.0",
+    "@x402/evm": "^2.8.0",
+    "@x402/express": "^2.8.0",
+    "better-sqlite3": ">=11.0.0",
+    "bull": ">=4.0.0",
+    "cheerio": ">=1.0.0",
+    "crawlee": ">=3.0.0",
+    "exceljs": ">=4.0.0",
+    "express": ">=4.18.0",
+    "googleapis": ">=140.0.0",
+    "got-scraping": ">=4.0.0",
+    "ioredis": "^5.4.1",
+    "nodemailer": ">=6.0.0",
+    "playwright": ">=1.40.0",
+    "puppeteer": ">=22.0.0",
+    "puppeteer-extra": ">=3.3.0",
+    "puppeteer-extra-plugin-stealth": ">=2.11.0",
+    "selenium-webdriver": ">=4.0.0",
+    "socket.io": ">=4.0.0",
+    "viem": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@atproto/api": {
+      "optional": true
+    },
+    "@prisma/client": {
+      "optional": true
+    },
+    "@x402/core": {
+      "optional": true
+    },
+    "@x402/evm": {
+      "optional": true
+    },
+    "@x402/express": {
+      "optional": true
+    },
+    "better-sqlite3": {
+      "optional": true
+    },
+    "bull": {
+      "optional": true
+    },
+    "cheerio": {
+      "optional": true
+    },
+    "crawlee": {
+      "optional": true
+    },
+    "exceljs": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "googleapis": {
+      "optional": true
+    },
+    "got-scraping": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "nodemailer": {
+      "optional": true
+    },
+    "playwright": {
+      "optional": true
+    },
+    "puppeteer": {
+      "optional": true
+    },
+    "puppeteer-extra": {
+      "optional": true
+    },
+    "puppeteer-extra-plugin-stealth": {
+      "optional": true
+    },
+    "selenium-webdriver": {
+      "optional": true
+    },
+    "socket.io": {
+      "optional": true
+    },
+    "viem": {
+      "optional": true
+    }
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/nirholas"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

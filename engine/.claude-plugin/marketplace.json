@@ -1,0 +1,29 @@
+{
+  "name": "nanomind-x",
+  "displayName": "nanomind-x — X/Twitter Automation",
+  "description": "Complete X/Twitter automation toolkit with 153 MCP tools. Scrape, post, engage, analyze — no API fees.",
+  "version": "1.0.0",
+  "author": "nichxbt",
+  "homepage": "https://github.com/NanoMindExplorer/nanomind-x",
+  "repository": "https://github.com/NanoMindExplorer/nanomind-x",
+  "plugins": [
+    {
+      "name": "nanomind-x",
+      "description": "Complete X/Twitter automation — 153 MCP tools for scraping, posting, engagement, analytics, DMs, moderation, streaming, workflows, and data portability. Uses Puppeteer browser automation. No API fees.",
+      "version": "4.0.1",
+      "path": ".",
+      "tags": [
+        "twitter",
+        "x",
+        "social-media",
+        "automation",
+        "scraping",
+        "mcp",
+        "engagement",
+        "analytics"
+      ],
+      "homepage": "https://github.com/NanoMindExplorer/nanomind-x",
+      "repository": "https://github.com/NanoMindExplorer/nanomind-x"
+    }
+  ]
+}
