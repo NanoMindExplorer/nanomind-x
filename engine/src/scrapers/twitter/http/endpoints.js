@@ -162,6 +162,23 @@ export const TRACKED_OPERATIONS = Object.freeze({
   BlueVerifiedFollowers: 'BlueVerifiedFollowers',
   FollowersYouKnow: 'FollowersYouKnow',
 
+  // ---- Queries (articles) ----
+  // ArticleEntityResultByRestId is the direct article fetch the web client's
+  // editor uses. It currently returns an empty `result: {}` for every request
+  // variant (features, fieldToggles, GET/POST, txid on/off) — see
+  // research/article-fix/NOTES.md — so the reader below does NOT use it. It
+  // is tracked so the query-ID refresh keeps its ID current in case x.com
+  // fixes the direct route later.
+  ArticleEntityResultByRestId: 'ArticleEntityResultByRestId',
+  // A user's article list (profile Articles tab). Not the content fetcher.
+  ArticleEntitiesSlice: 'ArticleEntitiesSlice',
+  // The redirect screen's Relay persisted query. This is what resolves an
+  // article rest_id to its linked tweet (metadata.tweet_results.rest_id) —
+  // hop 1 of the article reader. It is a Relay query (params.id, no
+  // `queryId:` descriptor), so the generator never sees it and it must stay
+  // pinned in QUERY_ID_PINS below.
+  ArticleRedirectScreenQuery: 'ArticleRedirectScreenQuery',
+
   // ---- Queries (community notes, called Birdwatch internally) ----
   CommunityNotesTimeline: 'BirdwatchFetchGlobalTimeline',
   CommunityNotesForTweet: 'BirdwatchFetchNotes',
@@ -180,7 +197,40 @@ export const TRACKED_OPERATIONS = Object.freeze({
  *
  * @type {Readonly<Record<string, string>>}
  */
-export const QUERY_ID_PINS = Object.freeze({});
+export const QUERY_ID_PINS = Object.freeze({
+  // ArticleRedirectScreenQuery is a Relay persisted query (params.id in
+  // bundle.Articles, no `queryId:` descriptor), so no sync can discover it.
+  // Verified live 2026-11-06 from bundle.Articles.2bfde9672fd5f3ce.js
+  // (ArticleRedirectScreenQuery, params.id zrSRXJmE1vj37AUmkh2oGg).
+  ArticleRedirectScreenQuery: 'zrSRXJmE1vj37AUmkh2oGg',
+  // The generated table's upstream snapshot (2026-08-27) carries stale IDs
+  // for the article operations. Current IDs verified live 2026-11-06 from
+  // bundle.TwitterArticles.8b06a0368bd03f24.js. Remove these pins after the
+  // next `npm run sync:endpoints` pulls a fresh upstream snapshot.
+  ArticleEntityResultByRestId: 'eUiP53I_YemhBOI2TMCI3A',
+  ArticleEntitiesSlice: '8hpdcfFniawLzEQ7CD2WMQ',
+});
+
+/**
+ * Field toggles that make a tweet's `article` field return the full article
+ * body (plain_text + content_state) instead of the preview-only card
+ * (title + preview_text + cover_media).
+ *
+ * Verified live 2026-11-06: TweetResultByRestId for a tweet carrying an
+ * article returns 4,451 bytes (preview only) without these toggles and
+ * ~22,600 bytes with them — `article.article_results.result` then carries
+ * `plain_text`, `content_state`, `media_entities` and the rest. The direct
+ * ArticleEntityResultByRestId query does NOT respond to these toggles (it
+ * returns an empty result either way); they only work on the tweet hop.
+ * See research/article-fix/NOTES.md.
+ *
+ * @type {Readonly<Record<string, boolean>>}
+ */
+export const ARTICLE_FIELD_TOGGLES = Object.freeze({
+  withArticlePlainText: true,
+  withArticleRichContentState: true,
+  withArticleSummaryText: true,
+});
 
 /**
  * Tracked operations the generated table does not carry. Populated when x.com

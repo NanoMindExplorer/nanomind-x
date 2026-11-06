@@ -12,6 +12,7 @@
 import * as fs from 'node:fs/promises';
 import * as usersApi from './api/users.js';
 import * as tweetsApi from './api/tweets.js';
+import * as articlesApi from './api/articles.js';
 import * as searchApi from './api/search.js';
 import * as trendsApi from './api/trends.js';
 import * as listsApi from './api/lists.js';
@@ -19,7 +20,7 @@ import * as dmsApi from './api/dms.js';
 import * as notificationsApi from './api/notifications.js';
 import * as mediaApi from './api/media.js';
 import { ScraperError, AuthenticationError } from './errors.js';
-import { validateUsername, validateTweetId, validateTweetText, validateCount } from './validation.js';
+import { validateUsername, validateTweetId, validateArticleId, validateTweetText, validateCount } from './validation.js';
 import { TokenManager } from './auth/TokenManager.js';
 
 /**
@@ -528,6 +529,23 @@ export class Scraper {
   async getTweet(id) {
     const validId = validateTweetId(id);
     return tweetsApi.getTweet(this._http, validId);
+  }
+
+  /**
+   * Get a full X Article by its rest id.
+   *
+   * Local patch 2026-11-06 (hero #19, v2.2.0): see api/articles.js — a
+   * two-hop read (redirect query -> tweet query with the article
+   * fieldToggles), because the direct ArticleEntityResultByRestId query
+   * returns an empty result from this client. Read-only, not search-capped
+   * (same as getTweet/getProfile).
+   *
+   * @param {string} id - Article rest id
+   * @returns {Promise<import('../scrapers/twitter/http/articles.js').parseArticle>} Parsed article.
+   */
+  async getArticle(id) {
+    const validId = validateArticleId(id);
+    return articlesApi.getArticle(this._http, validId);
   }
 
   /**

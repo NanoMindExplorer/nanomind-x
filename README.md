@@ -4,7 +4,7 @@ Agent-fit X tool: signed GraphQL search, profile and timeline reads, and
 posting with a dry-run default and an idempotency guard. One JSON object per
 call, structured errors, exit codes an agent can branch on.
 
-Version 2.1.0 — 36 commands covering search, reads, posting, engagement and
+Version 2.2.0 — 37 commands covering search, reads, posting, engagement and
 account management, all through signed GraphQL/REST paths (no login form,
 no browser needed for reads or posts). See [Features](#features) for the
 full list.
@@ -22,6 +22,16 @@ author parsing. Full upstream attribution is in `NOTICE`.
   capped at one call per 60 seconds (`--burst` overrides and logs it)
 - `profile <screen_name>`, `timeline <screen_name>` — profile and tweets
 - `tweet --id <tweet_id>` — one tweet
+- `article --id <article_id>` — a full X Article: title, author, published
+  time, full plain text, content blocks, links and cover image (v2.2.0).
+  Articles live in a different ID namespace than tweets, so `tweet --id`
+  and `thread --id` on an article id route here automatically instead of
+  reporting "not found". The reader is a two-hop GraphQL read (redirect
+  query resolves the article to its linked tweet, then the tweet query with
+  the article fieldToggles returns the body) — the direct
+  `ArticleEntityResultByRestId` query returns an empty result from this
+  client; see `research/article-fix/NOTES.md`. Read-only; publishing
+  articles is not supported.
 - `thread --id <tweet_id>` — the full conversation: focal tweet plus its
   replies in order (v2.1.0)
 - `liked`, `followers`, `following`, `replies` — liked tweets, followers,
@@ -67,9 +77,10 @@ author parsing. Full upstream attribution is in `NOTICE`.
   account is verifiably blocked — X no longer serves `blocks/destroy.json`
   to this session. Treat a block as effectively permanent from this tool;
   check the current list with `nanomind-x blocked`.
-- No scheduled posts, polls, lists, Spaces, Grok or articles — and no
+- No scheduled posts, polls, lists, Spaces or Grok — and no
   automation of any kind (auto-follow, auto-like, bulk actions). Deliberate:
-  automation is what gets accounts flagged.
+  automation is what gets accounts flagged. X Articles can be READ
+  (`article --id`, v2.2.0) but not published from this tool.
 
 ## Install
 

@@ -112,6 +112,17 @@ export const GRAPHQL_ENDPOINTS = {
   UserTweets: graphqlEndpoint('UserTweets', 'E3opETHurmVJflFsUBVuUQ', { method: 'GET' }),
   UserTweetsAndReplies: graphqlEndpoint('UserTweetsAndReplies', 'Q6aAvPw7azXZbqXzuqTALA', { method: 'GET' }),
   TweetDetail: graphqlEndpoint('TweetDetail', 'BbCrSoXIR7z93lLCVFlQ2Q', { method: 'GET' }),
+  // Local patch 2026-11-06 (hero #19, v2.2.0): TweetResultByRestId, the single
+  // tweet lookup the article reader's second hop uses. Fallback is the ID the
+  // discovery cache held on 2026-11-06 (U8lc5aomF5krJzZ9vJ9wxg); the cache
+  // and the shared GRAPHQL map take precedence whenever they hold the op.
+  TweetResultByRestId: graphqlEndpoint('TweetResultByRestId', 'U8lc5aomF5krJzZ9vJ9wxg', { method: 'GET' }),
+  // Local patch 2026-11-06 (hero #19, v2.2.0): ArticleRedirectScreenQuery,
+  // hop 1 of the article reader — resolves an article rest_id to its linked
+  // tweet. A Relay persisted query (params.id, no `queryId:` descriptor), so
+  // its ID is pinned in src/scrapers/twitter/http/endpoints.js
+  // QUERY_ID_PINS and the fallback here is the same pinned ID.
+  ArticleRedirectScreenQuery: graphqlEndpoint('ArticleRedirectScreenQuery', 'zrSRXJmE1vj37AUmkh2oGg', { method: 'GET' }),
   SearchTimeline: graphqlEndpoint('SearchTimeline', 'gkjsKepM6gl_HmFWoWKfgg', { method: 'GET' }),
   Followers: graphqlEndpoint('Followers', 'djdTXDIk2qhd4OStqlUFeQ', { method: 'GET' }),
   Following: graphqlEndpoint('Following', 'IWP6Zt14sARO29lJT35bBw', { method: 'GET' }),
@@ -178,9 +189,13 @@ export const GRAPHQL_ENDPOINTS = {
  * @param {Object} endpoint - Entry from GRAPHQL_ENDPOINTS
  * @param {Object} [variables={}] - GraphQL variables
  * @param {Object} [features] - Feature flags (defaults to DEFAULT_FEATURES)
+ * @param {Object} [fieldToggles] - Field toggles, sent as the `fieldToggles`
+ *   URL param exactly the way x.com's web client sends them. Most operations
+ *   ignore them; the article reader needs them (see ARTICLE_FIELD_TOGGLES
+ *   in src/scrapers/twitter/http/endpoints.js).
  * @returns {string} Full URL with query parameters
  */
-export function buildGraphQLUrl(endpoint, variables = {}, features) {
+export function buildGraphQLUrl(endpoint, variables = {}, features, fieldToggles) {
   if (endpoint.isRest && endpoint.url) {
     return endpoint.url();
   }
@@ -194,6 +209,9 @@ export function buildGraphQLUrl(endpoint, variables = {}, features) {
   const params = new URLSearchParams();
   params.set('variables', JSON.stringify(mergedVars));
   params.set('features', JSON.stringify(mergedFeatures));
+  if (fieldToggles) {
+    params.set('fieldToggles', JSON.stringify(fieldToggles));
+  }
 
   return `${base}?${params.toString()}`;
 }

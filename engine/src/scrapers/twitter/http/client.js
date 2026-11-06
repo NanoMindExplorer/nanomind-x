@@ -350,11 +350,18 @@ export class TwitterHttpClient {
    * @param {object} variables
    * @param {object} [options]
    * @param {object} [options.features]
+   * @param {object} [options.fieldToggles] - Sent as the `fieldToggles` URL
+   *   param on GET (and in the POST body on mutations), exactly the way
+   *   x.com's web client sends them. Most operations ignore them; the
+   *   article reader needs them — `withArticlePlainText` /
+   *   `withArticleRichContentState` / `withArticleSummaryText` are what make
+   *   a tweet's `article` field return the full body instead of the preview.
    * @param {boolean} [options.mutation=false] - If true, sends POST
    * @returns {Promise<object>}
    */
   async graphql(queryId, operationName, variables, options = {}) {
     const features = options.features || DEFAULT_FEATURES;
+    const fieldToggles = options.fieldToggles || null;
     const isMutation = options.mutation === true;
 
     // The caller's queryId is the hardcoded table value. Prefer the ID
@@ -368,7 +375,7 @@ export class TwitterHttpClient {
     }
 
     try {
-      return await this._graphqlOnce(resolvedId, operationName, variables, features, isMutation);
+      return await this._graphqlOnce(resolvedId, operationName, variables, features, isMutation, fieldToggles);
     } catch (err) {
       if (!this._autoRefreshQueryIds || !this._isStaleQueryIdFailure(err)) throw err;
       const freshId = await this._refreshedQueryId(operationName);
@@ -376,7 +383,7 @@ export class TwitterHttpClient {
       if (this._debug) {
         console.log(`[TwitterHttpClient] ${operationName}: query ID ${resolvedId} is stale, retrying with ${freshId}`);
       }
-      return this._graphqlOnce(freshId, operationName, variables, features, isMutation);
+      return this._graphqlOnce(freshId, operationName, variables, features, isMutation, fieldToggles);
     }
   }
 
@@ -384,17 +391,19 @@ export class TwitterHttpClient {
    * One GraphQL round-trip with a fixed query ID.
    * @private
    */
-  async _graphqlOnce(queryId, operationName, variables, features, isMutation) {
+  async _graphqlOnce(queryId, operationName, variables, features, isMutation, fieldToggles = null) {
     if (isMutation) {
       const url = `${GRAPHQL_BASE}/${queryId}/${operationName}`;
       // Mutations don't paginate: return raw JSON
+      const body = { variables, features, queryId };
+      if (fieldToggles) body.fieldToggles = fieldToggles;
       return this.request(url, {
         method: 'POST',
-        body: { variables, features, queryId },
+        body,
       });
     }
 
-    const url = buildGraphQLUrl(queryId, operationName, variables, features);
+    const url = buildGraphQLUrl(queryId, operationName, variables, features, fieldToggles);
     const json = await this.request(url);
 
     // x.com answers every GraphQL query with the envelope { data, errors }.

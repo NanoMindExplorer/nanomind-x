@@ -14,6 +14,8 @@
 //   nanomind-x profile <screen_name>
 //   nanomind-x timeline <screen_name> [--limit N]
 //   nanomind-x tweet --id <tweet_id>
+//   nanomind-x article --id <article_id>   (READ a full X Article: title,
+//       author, plain text, blocks, urls, cover image — two-hop GraphQL read)
 //   nanomind-x liked <screen_name> [--limit N]
 //   nanomind-x followers <screen_name> [--limit N]
 //   nanomind-x following <screen_name> [--limit N]
@@ -71,6 +73,11 @@
 // - `thread` is two commands sharing one name: `thread --text ...` POSTS a
 //   thread, `thread --id <tweet_id>` READS a thread (focal tweet + replies).
 //   The read path takes no --confirm and touches no ledger.
+// - `tweet --id` / `thread --id` on an X Article id route to the article
+//   reader (same two-hop read as `article --id`) instead of a bare
+//   "not found": articles live in a different ID namespace than tweets.
+// - `article --id` is a READ (no ledger, no --confirm, not search-capped,
+//   same as tweet/profile).
 // - Search is capped at 1/60 s per wrapper invocation state (file-backed);
 //   --burst overrides and logs the override.
 import { Scraper } from './engine/src/client/index.js';
@@ -97,7 +104,7 @@ const SEARCH_MIN_INTERVAL_MS = 60_000;
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 60_000;
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 
 // ---------------------------------------------------------------------------
 // Output + logging
@@ -160,6 +167,15 @@ function httpStatusOf(err) {
   if (err?.httpStatus) return err.httpStatus;
   const m = String(err?.message || '').match(/HTTP\s+(\d{3})/);
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * True when the error means "this id is not a tweet" (or not a thread
+ * focal tweet). Used by `tweet --id` / `thread --id` to route an X Article
+ * id to the article reader instead of reporting a bare "not found".
+ */
+function isNotFound(err) {
+  return err?.name === 'NotFoundError' || httpStatusOf(err) === 404 || /not found/i.test(String(err?.message || ''));
 }
 function is226(err) {
   const s = JSON.stringify(err?.message || '') + JSON.stringify(err?.details || '');
@@ -318,7 +334,7 @@ function parseArgs(argv) {
   return args;
 }
 function usage() {
-  emit({ ok: false, error: { code: 'USAGE', message: 'Usage: nanomind-x <search|profile|timeline|tweet|liked|followers|following|replies|trends|blocked|me|notifications|dms|dm-read|post|reply|quote|thread|like|unlike|repost|unrepost|bookmark|unbookmark|follow|unfollow|pin|unpin|block|unblock|mute|unmute|bio|dm|delete|health> [args] [--confirm] [--dry-run] [--allow-browser-fallback] [--force] [--burst] [--mode latest|top|people] [--limit N] [--text ...] [--id ...] [--user ...] [--media <image>] [--type all|mentions|verified]', http_status: null, operation: null, retryable: false } });
+  emit({ ok: false, error: { code: 'USAGE', message: 'Usage: nanomind-x <search|profile|timeline|tweet|article|liked|followers|following|replies|trends|blocked|me|notifications|dms|dm-read|post|reply|quote|thread|like|unlike|repost|unrepost|bookmark|unbookmark|follow|unfollow|pin|unpin|block|unblock|mute|unmute|bio|dm|delete|health> [args] [--confirm] [--dry-run] [--allow-browser-fallback] [--force] [--burst] [--mode latest|top|people] [--limit N] [--text ...] [--id ...] [--user ...] [--media <image>] [--type all|mentions|verified]', http_status: null, operation: null, retryable: false } });
   process.exit(2);
 }
 
@@ -437,7 +453,42 @@ async function cmdTweet(args) {
     logLine({ command: 'tweet', operation: 'tweet', status: 'error', ms: Date.now() - t0, httpStatus: status });
     if (status === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'tweet', retryable: true });
     if (status === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'tweet', retryable: false });
+    // An id that is not a tweet may be an X Article id (different ID
+    // namespace): route it to the article reader instead of a bare
+    // "not found". If the article read also fails, name the `article`
+    // command in the error so the user knows where to go.
+    if (isNotFound(e)) {
+      try {
+        const article = await scraper.getArticle(id);
+        logLine({ command: 'tweet', operation: 'tweet-as-article', status: 'ok', ms: Date.now() - t0, rateLimitRemaining: lastRate.remaining });
+        emit({ ok: true, data: article, meta: { kind: 'article', note: `ID ${id} is an X Article, not a tweet; read it with: nanomind-x article --id ${id}` } });
+        return;
+      } catch (ae) {
+        const aStatus = httpStatusOf(ae);
+        if (aStatus === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'tweet', retryable: true });
+        if (aStatus === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'tweet', retryable: false });
+        fail('UPSTREAM', `Tweet ${id} not found. If this is an X Article id, read it with: nanomind-x article --id ${id}`, { http_status: 404, operation: 'tweet', retryable: false });
+      }
+    }
     fail('UPSTREAM', `Tweet read failed: ${e.message}`, { http_status: status, operation: 'tweet', retryable: status === 404 });
+  }
+}
+
+async function cmdArticle(args) {
+  const id = args.id;
+  if (!id || typeof id !== 'string') usage();
+  const t0 = Date.now();
+  const scraper = await makeScraper();
+  try {
+    const article = await scraper.getArticle(id);
+    logLine({ command: 'article', operation: 'article', status: 'ok', ms: Date.now() - t0, articleId: id, textChars: article.text?.length || 0, rateLimitRemaining: lastRate.remaining });
+    emit({ ok: true, data: article });
+  } catch (e) {
+    const status = httpStatusOf(e);
+    logLine({ command: 'article', operation: 'article', status: 'error', ms: Date.now() - t0, httpStatus: status });
+    if (status === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'article', retryable: true });
+    if (status === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'article', retryable: false });
+    fail('UPSTREAM', `Article read failed: ${e.message}`, { http_status: status, operation: 'article', retryable: status === 404 });
   }
 }
 
@@ -1151,6 +1202,22 @@ async function cmdThreadRead(args) {
   const scraper = await makeScraper();
   try {
     const thread = await scraper.getThread(id);
+    // An empty thread for an id that exists as an article: TweetDetail
+    // returns an empty conversation for article ids instead of throwing,
+    // so route it to the article reader rather than a silent empty thread.
+    if (!thread.entries || thread.entries.length === 0) {
+      try {
+        const article = await scraper.getArticle(id);
+        logLine({ command: 'thread', operation: 'thread-as-article', status: 'ok', ms: Date.now() - t0, rateLimitRemaining: lastRate.remaining });
+        emit({ ok: true, data: article, meta: { kind: 'article', note: `ID ${id} is an X Article, not a tweet; read it with: nanomind-x article --id ${id}` } });
+        return;
+      } catch (ae) {
+        const aStatus = httpStatusOf(ae);
+        if (aStatus === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'thread-read', retryable: true });
+        if (aStatus === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'thread-read', retryable: false });
+        fail('UPSTREAM', `Thread ${id} not found (empty conversation). If this is an X Article id, read it with: nanomind-x article --id ${id}`, { http_status: 404, operation: 'thread-read', retryable: false });
+      }
+    }
     logLine({ command: 'thread', operation: 'thread-read', status: 'ok', ms: Date.now() - t0, tweetId: id, entries: thread.entries.length, rateLimitRemaining: lastRate.remaining });
     emit({ ok: true, data: thread, meta: { focalTweetId: thread.focalTweetId, entries: thread.entries.length, hasMore: thread.hasMore } });
   } catch (e) {
@@ -1158,6 +1225,21 @@ async function cmdThreadRead(args) {
     logLine({ command: 'thread', operation: 'thread-read', status: 'error', ms: Date.now() - t0, httpStatus: status });
     if (status === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'thread-read', retryable: true });
     if (status === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'thread-read', retryable: false });
+    // Same article-id routing as `tweet --id`: an id that is not a thread
+    // focal tweet may be an X Article id.
+    if (isNotFound(e)) {
+      try {
+        const article = await scraper.getArticle(id);
+        logLine({ command: 'thread', operation: 'thread-as-article', status: 'ok', ms: Date.now() - t0, rateLimitRemaining: lastRate.remaining });
+        emit({ ok: true, data: article, meta: { kind: 'article', note: `ID ${id} is an X Article, not a tweet; read it with: nanomind-x article --id ${id}` } });
+        return;
+      } catch (ae) {
+        const aStatus = httpStatusOf(ae);
+        if (aStatus === 429) fail('RATE_LIMITED', 'X rate limit hit (429).', { http_status: 429, operation: 'thread-read', retryable: true });
+        if (aStatus === 401) fail('AUTH', 'X session rejected (401).', { http_status: 401, operation: 'thread-read', retryable: false });
+        fail('UPSTREAM', `Thread ${id} not found. If this is an X Article id, read it with: nanomind-x article --id ${id}`, { http_status: 404, operation: 'thread-read', retryable: false });
+      }
+    }
     fail('UPSTREAM', `Thread read failed: ${e.message}`, { http_status: status, operation: 'thread-read', retryable: status === 404 });
   }
 }
@@ -1282,6 +1364,7 @@ try {
   else if (cmd === 'profile') await cmdProfile(args);
   else if (cmd === 'timeline') await cmdTimeline(args);
   else if (cmd === 'tweet') await cmdTweet(args);
+  else if (cmd === 'article') await cmdArticle(args);
   else if (cmd === 'liked') await cmdLiked(args);
   else if (cmd === 'followers') await cmdFollowers(args);
   else if (cmd === 'following') await cmdFollowing(args);

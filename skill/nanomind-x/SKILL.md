@@ -26,6 +26,8 @@
 
 - Read a full conversation with `nanomind-x thread --id <tweet_id>` (v2.1.0; same `TweetDetail` call as `tweet`, single page). The result lists the focal tweet plus its replies in order, each tagged `role: ancestor | focal | reply`; `hasMore` reports whether a bottom cursor was present. Related tweets are excluded, only the conversation is returned.
 
+- Read a full X Article with `nanomind-x article --id <article_id>` (v2.2.0; read-only, not search-capped, same as `tweet`). The result carries `kind: "article"`, `id`, `title`, `author` (`username` + `name`), `publishedAt`, `modifiedAt`, `tweetId` (the tweet carrying the article), `previewText`, full `text`, content `blocks` (`{type, text}`), `urls` (links + media image URLs, deduplicated) and `coverImage`. Articles live in a different ID namespace than tweets, so `tweet --id` and `thread --id` on an article id route to this reader automatically instead of reporting "not found". The reader is a two-hop GraphQL read (redirect query resolves the article to its linked tweet, then the tweet query with the article fieldToggles returns the body) — the direct `ArticleEntityResultByRestId` query returns an empty result from this client. Publishing articles is not supported.
+
 - Read every result as one JSON object on stdout and branch on the exit code, using 0 for ok, 2 for usage, 3 for rate-limited, 4 for auth and 5 for upstream.
 
 - Treat reads as tool calls that never use the browser, and do not route a search through a browser session.
@@ -58,15 +60,15 @@
 
 - Send a real write only with `--confirm` after showing the exact preview text to the user and getting explicit approval for that write — unless the user has handed over account management, in which case the standing mandate covers routine follows and substantive replies, and every action is still reported with its link.
 
-## Not in v2.1.0 (deliberately)
+## Not in v2.2.0 (deliberately)
 
 - Scheduled posts (no cached query ID for the scheduling mutation).
 - Polls (no signed route).
 - Lists (reading or managing).
-- Spaces, Grok, and articles.
+- Spaces and Grok.
 - ALL automation — auto-follow, auto-like, auto-repost, auto-reply, bulk actions of any kind. Excluded on purpose: automation is what gets accounts flagged. Every write is a deliberate, single, human-approved action.
 
-Media upload (`--media`), thread reading (`thread --id`), and the notifications timeline are IN since v2.1.0 — they left this list, they are not new exclusions.
+Media upload (`--media`), thread reading (`thread --id`), and the notifications timeline are IN since v2.1.0 — they left this list, they are not new exclusions. X Article reading (`article --id`) is IN since v2.2.0 — it left this list too (publishing articles is still not supported).
 
 - Rely on the idempotency ledger to refuse a duplicate write for the same operation and text within 24 hours, and never pass `--force` without explicit approval for that write. Toggle pairs are stateful, not just history: recording the inverse of a toggle (unlike, unpin, unfollow, unblock, unmute, unrepost, unbookmark) invalidates the forward entry, so pin → unpin → pin is allowed while a repeated pin without an unpin in between is still refused.
 

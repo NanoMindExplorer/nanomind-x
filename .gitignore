@@ -6,3 +6,11 @@ proxy_forward.log
 .DS_Store
 # Pre-patch originals stay local; the patch files themselves are the record.
 patches/*.orig-*
+# Article-fix research artifacts (2026-11-06): downloaded X HTML/JS bundles and
+# raw GraphQL response dumps stay local. The probe scripts (*.mjs) and
+# NOTES.md in research/article-fix/ ARE tracked.
+research/article-fix/*.html
+research/article-fix/*.json
+research/article-fix/bundle.*.js
+research/article-fix/loader.*.js
+research/article-fix/main.bundle.js

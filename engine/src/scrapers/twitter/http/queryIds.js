@@ -116,6 +116,13 @@ export const CORE_CHUNK_PATTERNS = [
   /^shared~.*HomeTimeline.*Compose/,
   /^shared~bundle\.BookmarkFolders~bundle\.Bookmarks$/,
   /^shared~.*TweetActivity/,
+  // bundle.TwitterArticles: ArticleEntityResultByRestId, ArticleEntitiesSlice
+  // and the article authoring mutations. The article reader resolves an
+  // article id through ArticleRedirectScreenQuery, which lives in
+  // bundle.Articles as a Relay query (params.id, no `queryId:` descriptor)
+  // — the OPERATION_RE below cannot discover it, so it stays pinned in
+  // endpoints.js QUERY_ID_PINS instead of being listed here.
+  /^bundle\.TwitterArticles$/,
 ];
 
 /** Chunks that never carry operations and are skipped even in `full` scope. */

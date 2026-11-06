@@ -51,6 +51,25 @@ export function validateTweetId(id) {
 }
 
 /**
+ * Validate a numeric X Article ID string. Articles live in a different ID
+ * namespace than tweets, but the shape is the same numeric snowflake.
+ *
+ * @param {string} id
+ * @returns {string}
+ * @throws {ScraperError}
+ */
+export function validateArticleId(id) {
+  if (!id || typeof id !== 'string') {
+    throw new ScraperError('Article ID is required', 'INVALID_INPUT');
+  }
+  const cleaned = id.trim();
+  if (!/^\d{1,20}$/.test(cleaned)) {
+    throw new ScraperError('Article ID must be a numeric string (1-20 digits)', 'INVALID_INPUT');
+  }
+  return cleaned;
+}
+
+/**
  * Validate tweet text length.
  *
  * @param {string} text

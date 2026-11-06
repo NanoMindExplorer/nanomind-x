@@ -1,6 +1,6 @@
 {
   "name": "nanomind-x",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "nanomind-x \u2014 agent-fit X tool: signed GraphQL search, profile, timeline and posting with dry-run default and an idempotency guard. Engine forked in-tree; see NOTICE for upstream attribution.",
   "bin": {
     "nanomind-x": "./nanomind-x.mjs",
