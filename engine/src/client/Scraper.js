@@ -133,7 +133,15 @@ class SimpleHttp {
    * @returns {Promise<any>}
    */
   async get(url) {
-    await this._tokenManager.getGuestToken();
+    // Local patch 2026-11-07 (hero, v2.2.1): lazy guest-token activation.
+    // TokenManager's contract is that ct0 replaces the guest token for
+    // authenticated requests (see client/auth/TokenManager.js header), and
+    // getHeaders(true) never sends x-guest-token — so an authenticated
+    // request has no use for one. Activating unconditionally made every
+    // logged-in command depend on POST /1.1/guest/activate.json; on a host
+    // whose egress policy blocks that endpoint, health/me/search all died
+    // before any cookie was used. Only guest-mode requests activate one.
+    if (!this._authenticated) await this._tokenManager.getGuestToken();
     const headers = this._tokenManager.getHeaders(this._authenticated);
     if (this._cookies) {
       headers['Cookie'] = this._cookies;
@@ -168,7 +176,8 @@ class SimpleHttp {
    * @returns {Promise<any>}
    */
   async post(url, body, extraHeaders = {}) {
-    await this._tokenManager.getGuestToken();
+    // Lazy guest activation (see get()): authenticated requests skip it.
+    if (!this._authenticated) await this._tokenManager.getGuestToken();
     const headers = {
       ...this._tokenManager.getHeaders(this._authenticated),
       ...extraHeaders,
@@ -219,7 +228,8 @@ class SimpleHttp {
    * @returns {Promise<any>} Parsed JSON, or {} for an empty response
    */
   async postForm(url, form, extraHeaders = {}) {
-    await this._tokenManager.getGuestToken();
+    // Lazy guest activation (see get()): authenticated requests skip it.
+    if (!this._authenticated) await this._tokenManager.getGuestToken();
     const headers = {
       ...this._tokenManager.getHeaders(this._authenticated),
       ...extraHeaders,

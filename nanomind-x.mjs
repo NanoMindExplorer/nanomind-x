@@ -104,7 +104,7 @@ const SEARCH_MIN_INTERVAL_MS = 60_000;
 const IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 60_000;
 
-const VERSION = '2.2.0';
+const VERSION = '2.2.1';
 
 // ---------------------------------------------------------------------------
 // Output + logging

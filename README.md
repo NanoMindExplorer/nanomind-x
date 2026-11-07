@@ -4,7 +4,7 @@ Agent-fit X tool: signed GraphQL search, profile and timeline reads, and
 posting with a dry-run default and an idempotency guard. One JSON object per
 call, structured errors, exit codes an agent can branch on.
 
-Version 2.2.0 — 37 commands covering search, reads, posting, engagement and
+Version 2.2.1 — 37 commands covering search, reads, posting, engagement and
 account management, all through signed GraphQL/REST paths (no login form,
 no browser needed for reads or posts). See [Features](#features) for the
 full list.

@@ -95,6 +95,24 @@ async function checkGuestTier() {
         fix: 'Run `npm run check:endpoints` to identify it, then update src/scrapers/twitter/http/endpoints.js.',
       };
     }
+    // Local patch 2026-11-07 (hero, v2.2.1): a network policy that blocks
+    // guest-token activation is an environment limitation, not a tool
+    // breakage. The egress gate answers activate.json with HTTP 403 and a
+    // "network access denied" body, so a logged-out read cannot work from
+    // this host — but a saved session still can (its requests never need a
+    // guest token; see SimpleHttp in client/Scraper.js). Report it as a
+    // warning so it does not mask a valid session; X-side failures below
+    // (rotated query IDs etc.) still fail.
+    if (
+      /guest token activation failed/i.test(error.message) &&
+      /network access denied/i.test(error.message)
+    ) {
+      return {
+        status: 'warn',
+        detail: 'Guest tier unavailable: this machine blocks guest-token activation (network policy). Logged-in commands are unaffected.',
+        fix: 'Allow POST https://api.x.com/1.1/guest/activate.json in the egress policy to restore logged-out reads, or just use a logged-in session.',
+      };
+    }
     return {
       status: 'fail',
       detail: error.message,
